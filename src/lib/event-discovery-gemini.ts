@@ -78,8 +78,17 @@ export type GeminiDiscoveryInvoker = (
 
 export type EnrichDiscoveryEventOptions = {
   apiKey?: string;
+  deadlineMs?: number;
+  fetchImpl?: typeof fetch;
   invokeGemini?: GeminiDiscoveryInvoker;
+  nowMs?: () => number;
 };
+
+const GEMINI_INTERACTIONS_ENDPOINT =
+  "https://generativelanguage.googleapis.com/v1/interactions";
+const GEMINI_RESPONSE_LIMIT_BYTES = 128_000;
+const GEMINI_TIMEOUT_MS = 10_000;
+const GEMINI_MAX_RETRY_DELAY_MS = 2_000;
 
 const CATEGORY_KEYWORDS = {
   Business: [
@@ -346,17 +355,297 @@ function parseGeminiEnrichment(
   };
 }
 
+class GeminiHttpError extends Error {
+  constructor(
+    readonly status: number,
+    readonly retryAfterMs: number | null,
+  ) {
+    super(`GEMINI_HTTP_${status}`);
+  }
+}
+
+class GeminiDeadlineError extends Error {
+  constructor() {
+    super("GEMINI_DEADLINE_EXCEEDED");
+  }
+}
+
+class GeminiResponseError extends Error {}
+
+class GeminiTransportError extends Error {
+  constructor() {
+    super("GEMINI_TRANSPORT_ERROR");
+  }
+}
+
+function extractInteractionOutput(value: unknown): string | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return undefined;
+  }
+
+  const interaction = value as {
+    status?: unknown;
+    steps?: unknown;
+  };
+  if (interaction.status !== "completed") {
+    return undefined;
+  }
+
+  const steps = interaction.steps;
+  if (!Array.isArray(steps)) {
+    return undefined;
+  }
+
+  for (let index = steps.length - 1; index >= 0; index -= 1) {
+    const step = steps[index];
+    if (
+      !step ||
+      typeof step !== "object" ||
+      Array.isArray(step) ||
+      (step as { type?: unknown }).type !== "model_output"
+    ) {
+      continue;
+    }
+
+    const content = (step as { content?: unknown }).content;
+    if (!Array.isArray(content)) {
+      continue;
+    }
+
+    const text = content
+      .filter(
+        (part): part is { text: string; type: "text" } =>
+          Boolean(
+            part &&
+              typeof part === "object" &&
+              !Array.isArray(part) &&
+              (part as { type?: unknown }).type === "text" &&
+              typeof (part as { text?: unknown }).text === "string",
+          ),
+      )
+      .map((part) => part.text)
+      .join("");
+
+    if (text) {
+      return text;
+    }
+  }
+
+  return undefined;
+}
+
+function shouldRetryGemini(error: unknown): boolean {
+  if (error instanceof GeminiHttpError) {
+    return (
+      error.status === 408 ||
+      error.status === 429 ||
+      error.status >= 500
+    );
+  }
+
+  return error instanceof GeminiTransportError;
+}
+
+function retryAfterMilliseconds(value: string | null): number | null {
+  if (!value?.trim()) {
+    return null;
+  }
+
+  const seconds = Number(value);
+  if (Number.isFinite(seconds) && seconds >= 0) {
+    return Math.min(
+      GEMINI_MAX_RETRY_DELAY_MS,
+      Math.round(seconds * 1_000),
+    );
+  }
+
+  const date = Date.parse(value);
+  if (Number.isNaN(date)) {
+    return null;
+  }
+
+  return Math.min(
+    GEMINI_MAX_RETRY_DELAY_MS,
+    Math.max(0, date - Date.now()),
+  );
+}
+
+async function waitBeforeGeminiRetry(
+  error: unknown,
+  attempt: number,
+  deadlineMs: number | undefined,
+  nowMs: () => number,
+): Promise<void> {
+  const retryAfter =
+    error instanceof GeminiHttpError ? error.retryAfterMs : null;
+  let delay =
+    retryAfter ??
+    Math.min(
+      GEMINI_MAX_RETRY_DELAY_MS,
+      200 * 2 ** attempt + Math.floor(Math.random() * 100),
+    );
+
+  if (deadlineMs !== undefined) {
+    const remaining = deadlineMs - nowMs();
+    if (remaining <= 0) {
+      throw new GeminiDeadlineError();
+    }
+    delay = Math.min(delay, remaining);
+  }
+
+  if (delay > 0) {
+    await new Promise((resolve) => setTimeout(resolve, delay));
+  }
+}
+
+function assertBeforeGeminiDeadline(
+  deadlineMs: number | undefined,
+  nowMs: () => number,
+): void {
+  if (deadlineMs !== undefined && nowMs() >= deadlineMs) {
+    throw new GeminiDeadlineError();
+  }
+}
+
+async function readBoundedGeminiResponse(
+  response: Response,
+): Promise<string> {
+  const declaredLength = Number(
+    response.headers.get("content-length") ?? "0",
+  );
+  if (
+    Number.isFinite(declaredLength) &&
+    declaredLength > GEMINI_RESPONSE_LIMIT_BYTES
+  ) {
+    await response.body?.cancel().catch(() => undefined);
+    throw new GeminiResponseError("GEMINI_RESPONSE_TOO_LARGE");
+  }
+
+  if (!response.body) {
+    return "";
+  }
+
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let totalBytes = 0;
+
+  try {
+    while (true) {
+      let result: ReadableStreamReadResult<Uint8Array>;
+      try {
+        result = await reader.read();
+      } catch {
+        throw new GeminiTransportError();
+      }
+
+      const { done, value } = result;
+      if (done) {
+        break;
+      }
+
+      totalBytes += value.byteLength;
+      if (totalBytes > GEMINI_RESPONSE_LIMIT_BYTES) {
+        await reader.cancel().catch(() => undefined);
+        throw new GeminiResponseError("GEMINI_RESPONSE_TOO_LARGE");
+      }
+
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+
+  const combined = new Uint8Array(totalBytes);
+  let offset = 0;
+  for (const chunk of chunks) {
+    combined.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+
+  try {
+    return new TextDecoder("utf-8", { fatal: true }).decode(combined);
+  } catch {
+    throw new GeminiResponseError("GEMINI_RESPONSE_ENCODING");
+  }
+}
+
 async function createDefaultGeminiInvoker(
   apiKey: string,
+  fetchImpl: typeof fetch = fetch,
+  deadlineMs?: number,
+  nowMs: () => number = Date.now,
 ): Promise<GeminiDiscoveryInvoker> {
-  const { GoogleGenAI } = await import("@google/genai");
-  const client = new GoogleGenAI({ apiKey });
+  return async (request) => {
+    let lastError: unknown;
 
-  return async (request) =>
-    client.interactions.create(request, {
-      maxRetries: 1,
-      timeout: 10_000,
-    });
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      assertBeforeGeminiDeadline(deadlineMs, nowMs);
+      const remaining =
+        deadlineMs === undefined
+          ? GEMINI_TIMEOUT_MS
+          : Math.max(1, deadlineMs - nowMs());
+      const controller = new AbortController();
+      const timeout = setTimeout(
+        () => controller.abort(),
+        Math.min(GEMINI_TIMEOUT_MS, remaining),
+      );
+
+      try {
+        let response: Response;
+        try {
+          response = await fetchImpl(GEMINI_INTERACTIONS_ENDPOINT, {
+            body: JSON.stringify(request),
+            cache: "no-store",
+            headers: {
+              "content-type": "application/json",
+              "x-goog-api-key": apiKey,
+            },
+            method: "POST",
+            redirect: "error",
+            signal: controller.signal,
+          });
+        } catch {
+          throw new GeminiTransportError();
+        }
+
+        assertBeforeGeminiDeadline(deadlineMs, nowMs);
+
+        if (!response.ok) {
+          await response.body?.cancel().catch(() => undefined);
+          throw new GeminiHttpError(
+            response.status,
+            retryAfterMilliseconds(
+              response.headers.get("retry-after"),
+            ),
+          );
+        }
+
+        const body = await readBoundedGeminiResponse(response);
+
+        return {
+          output_text: extractInteractionOutput(
+            JSON.parse(body) as unknown,
+          ),
+        };
+      } catch (error) {
+        lastError = error;
+        if (attempt === 1 || !shouldRetryGemini(error)) {
+          throw error;
+        }
+        clearTimeout(timeout);
+        await waitBeforeGeminiRetry(
+          error,
+          attempt,
+          deadlineMs,
+          nowMs,
+        );
+      } finally {
+        clearTimeout(timeout);
+      }
+    }
+
+    throw lastError;
+  };
 }
 
 export async function enrichDiscoveryEvent(
@@ -373,6 +662,14 @@ export async function enrichDiscoveryEvent(
     return fallback;
   }
 
+  const nowMs = options.nowMs ?? Date.now;
+  if (
+    options.deadlineMs !== undefined &&
+    nowMs() >= options.deadlineMs
+  ) {
+    return fallback;
+  }
+
   const apiKey = (options.apiKey ?? process.env.GEMINI_API_KEY)?.trim();
   if (!apiKey) {
     return fallback;
@@ -380,7 +677,13 @@ export async function enrichDiscoveryEvent(
 
   try {
     const invokeGemini =
-      options.invokeGemini ?? (await createDefaultGeminiInvoker(apiKey));
+      options.invokeGemini ??
+      (await createDefaultGeminiInvoker(
+        apiKey,
+        options.fetchImpl,
+        options.deadlineMs,
+        nowMs,
+      ));
     const response = await invokeGemini({
       model: GEMINI_DISCOVERY_MODEL,
       store: false,

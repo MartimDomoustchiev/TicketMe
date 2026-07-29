@@ -4,6 +4,7 @@ import { isSameOriginRequest } from "@/lib/request-security";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+export const maxDuration = 60;
 
 function jsonResponse(
   body: Record<string, unknown>,

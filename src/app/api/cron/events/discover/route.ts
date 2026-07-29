@@ -3,6 +3,7 @@ import { runEventDiscovery } from "@/lib/event-discovery";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+export const maxDuration = 60;
 
 const MINIMUM_CRON_SECRET_LENGTH = 32;
 const MAXIMUM_BEARER_TOKEN_LENGTH = 1_024;

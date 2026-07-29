@@ -1,4 +1,10 @@
-import { copyFileSync, existsSync, mkdtempSync, rmSync } from "node:fs";
+import {
+  copyFileSync,
+  existsSync,
+  mkdtempSync,
+  rmSync,
+  statSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -22,6 +28,7 @@ const wranglerCli = join(
   "wrangler.js",
 );
 const workerPath = join(projectRoot, ".open-next", "worker.js");
+const sitesWorkerMaxBytes = 9_750_000;
 
 function runCli(cliPath, args) {
   const result = spawnSync(process.execPath, [cliPath, ...args], {
@@ -61,7 +68,17 @@ try {
   }
 
   copyFileSync(bundledWorkerPath, workerPath);
-  console.log("Sites worker bundle is ready at .open-next/worker.js");
+  const workerBytes = statSync(workerPath).size;
+
+  if (workerBytes > sitesWorkerMaxBytes) {
+    throw new Error(
+      `Sites worker is ${workerBytes} bytes; the release guard is ${sitesWorkerMaxBytes} bytes.`,
+    );
+  }
+
+  console.log(
+    `Sites worker bundle is ready at .open-next/worker.js (${workerBytes} bytes)`,
+  );
 } finally {
   rmSync(bundleDirectory, { force: true, recursive: true });
 }

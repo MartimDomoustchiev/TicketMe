@@ -7,6 +7,7 @@ import {
   dedupeDiscoveryCandidates,
   detectDiscoveryFeedFormat,
   discoverEventCandidates,
+  enrichDiscoveryCandidates,
   enrichDiscoveryEvent,
   fetchDiscoveryFeed,
   isAllowedDiscoverySourceUrl,
@@ -472,4 +473,272 @@ test("Gemini failures and invalid output fall back deterministically", async () 
   assert.equal(noKey.enrichedBy, "deterministic");
   assert.deepEqual(failed, noKey);
   assert.deepEqual(invalid, noKey);
+});
+
+test("Gemini enrichment uses the bounded stateless Interactions REST API", async () => {
+  const event = candidate();
+  let attempts = 0;
+
+  const enriched = await enrichDiscoveryEvent(event, {
+    apiKey: "test-key",
+    fetchImpl: async (input, init) => {
+      attempts += 1;
+      assert.equal(
+        input.toString(),
+        "https://generativelanguage.googleapis.com/v1/interactions",
+      );
+      assert.equal(init?.method, "POST");
+      assert.equal(
+        new Headers(init?.headers).get("x-goog-api-key"),
+        "test-key",
+      );
+      assert.equal(input.toString().includes("test-key"), false);
+
+      const request = JSON.parse(String(init?.body)) as GeminiDiscoveryRequest;
+      assert.equal(request.model, "gemini-3.5-flash-lite");
+      assert.equal(request.store, false);
+      assert.equal("tools" in request, false);
+
+      if (attempts === 1) {
+        return Response.json(
+          { error: "temporary" },
+          {
+            status: 503,
+            headers: { "Retry-After": "0" },
+          },
+        );
+      }
+
+      return Response.json({
+        status: "completed",
+        steps: [
+          {
+            type: "model_output",
+            content: [
+              {
+                type: "text",
+                text: JSON.stringify({
+                  appealScore: 88,
+                  category: "Festivals",
+                  descriptionBg: "Публичен музикален фестивал.",
+                  descriptionEn: "A public music festival.",
+                  titleBg: "Фестивал Future Sound",
+                  titleEn: "Future Sound Festival",
+                }),
+              },
+            ],
+          },
+        ],
+      });
+    },
+  });
+
+  assert.equal(attempts, 2);
+  assert.equal(enriched.enrichedBy, "gemini");
+  assert.equal(enriched.enrichment.appealScore, 88);
+});
+
+test("Gemini ignores incomplete and oversized responses without retrying", async () => {
+  const event = candidate();
+  let incompleteAttempts = 0;
+  const incomplete = await enrichDiscoveryEvent(event, {
+    apiKey: "test-key",
+    fetchImpl: async () => {
+      incompleteAttempts += 1;
+      return Response.json({
+        status: "incomplete",
+        steps: [
+          {
+            type: "model_output",
+            content: [
+              {
+                type: "text",
+                text: JSON.stringify({
+                  appealScore: 99,
+                  category: "Festivals",
+                  descriptionBg: "Не трябва да се използва.",
+                  descriptionEn: "Must not be used.",
+                  titleBg: "Невалиден отговор",
+                  titleEn: "Invalid response",
+                }),
+              },
+            ],
+          },
+        ],
+      });
+    },
+  });
+
+  let oversizedAttempts = 0;
+  const oversized = await enrichDiscoveryEvent(event, {
+    apiKey: "test-key",
+    fetchImpl: async () => {
+      oversizedAttempts += 1;
+      const chunk = new Uint8Array(70_000);
+      const body = new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(chunk);
+          controller.enqueue(chunk);
+          controller.close();
+        },
+      });
+      return new Response(body, {
+        headers: { "content-type": "application/json" },
+      });
+    },
+  });
+
+  assert.equal(incompleteAttempts, 1);
+  assert.equal(oversizedAttempts, 1);
+  assert.equal(incomplete.enrichedBy, "deterministic");
+  assert.equal(oversized.enrichedBy, "deterministic");
+});
+
+test("Gemini retries transport failures but not bad responses", async () => {
+  const event = candidate();
+  let transportAttempts = 0;
+  const recovered = await enrichDiscoveryEvent(event, {
+    apiKey: "test-key",
+    fetchImpl: async () => {
+      transportAttempts += 1;
+      if (transportAttempts === 1) {
+        throw new TypeError("offline");
+      }
+
+      return Response.json({
+        status: "completed",
+        steps: [
+          {
+            type: "model_output",
+            content: [
+              {
+                type: "text",
+                text: JSON.stringify({
+                  appealScore: 87,
+                  category: "Festivals",
+                  descriptionBg: "Музикален фестивал.",
+                  descriptionEn: "A music festival.",
+                  titleBg: "Фестивал Future Sound",
+                  titleEn: "Future Sound Festival",
+                }),
+              },
+            ],
+          },
+        ],
+      });
+    },
+  });
+
+  let rejectedAttempts = 0;
+  let rejectedBodyCancelled = 0;
+  const rejected = await enrichDiscoveryEvent(event, {
+    apiKey: "test-key",
+    fetchImpl: async () => {
+      rejectedAttempts += 1;
+      const body = new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode('{"error":"bad"}'));
+        },
+        cancel() {
+          rejectedBodyCancelled += 1;
+        },
+      });
+      return new Response(body, { status: 400 });
+    },
+  });
+
+  let encodingAttempts = 0;
+  const malformed = await enrichDiscoveryEvent(event, {
+    apiKey: "test-key",
+    fetchImpl: async () => {
+      encodingAttempts += 1;
+      return new Response(new Uint8Array([0xff]));
+    },
+  });
+
+  assert.equal(transportAttempts, 2);
+  assert.equal(recovered.enrichedBy, "gemini");
+  assert.equal(rejectedAttempts, 1);
+  assert.equal(rejectedBodyCancelled, 1);
+  assert.equal(rejected.enrichedBy, "deterministic");
+  assert.equal(encodingAttempts, 1);
+  assert.equal(malformed.enrichedBy, "deterministic");
+});
+
+test("discovery opens its Gemini circuit after a failed batch", async () => {
+  const events = Array.from({ length: 7 }, (_, index) =>
+    candidate({
+      sourceId: `source-${index}`,
+      sourceUrl: `https://feeds.example.com/events/${index}`,
+      title: `Future event ${index}`,
+    }),
+  );
+  let calls = 0;
+
+  const enriched = await enrichDiscoveryCandidates(events, {
+    apiKey: "test-key",
+    invokeGemini: async () => {
+      calls += 1;
+      return {};
+    },
+  });
+
+  assert.equal(calls, 3);
+  assert.equal(enriched.length, events.length);
+  assert.equal(
+    enriched.every((event) => event.enrichedBy === "deterministic"),
+    true,
+  );
+});
+
+test("discovery does not start another Gemini batch after its deadline", async () => {
+  const events = Array.from({ length: 7 }, (_, index) =>
+    candidate({
+      sourceId: `deadline-${index}`,
+      sourceUrl: `https://feeds.example.com/events/deadline-${index}`,
+      title: `Deadline event ${index}`,
+    }),
+  );
+  let calls = 0;
+  let clock = 0;
+
+  const enriched = await enrichDiscoveryCandidates(events, {
+    apiKey: "test-key",
+    nowMs: () => clock,
+    runBudgetMs: 25_000,
+    fetchImpl: async () => {
+      calls += 1;
+      if (calls === 3) {
+        clock = 25_000;
+      }
+      return Response.json({
+        status: "completed",
+        steps: [
+          {
+            type: "model_output",
+            content: [
+              {
+                type: "text",
+                text: JSON.stringify({
+                  appealScore: 84,
+                  category: "Festivals",
+                  descriptionBg: "Фестивал.",
+                  descriptionEn: "Festival.",
+                  titleBg: "Събитие",
+                  titleEn: "Event",
+                }),
+              },
+            ],
+          },
+        ],
+      });
+    },
+  });
+
+  assert.equal(calls, 3);
+  assert.equal(enriched.length, events.length);
+  assert.equal(
+    enriched.every((event) => event.enrichedBy === "deterministic"),
+    true,
+  );
 });

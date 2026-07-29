@@ -95,7 +95,7 @@ Snapshot-ът е нормализиран от публичния календа
 - `qrcode` за входен QR код
 - Resend за transactional email
 - AWS SDK S3 client за Cloudflare R2 или AWS S3
-- `@google/genai` за опционално Gemini 3.5 Flash-Lite enrichment без Search
+- Gemini Interactions REST API за опционално Gemini 3.5 Flash-Lite enrichment без Search
   grounding или URL Context
 - `fast-xml-parser` и `node-ical` за bounded RSS/Atom/ICS parsing
 

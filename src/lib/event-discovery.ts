@@ -4,6 +4,7 @@ import type {
   JsonValue,
 } from "@/lib/catalog-types";
 import {
+  deterministicDiscoveryEnrichment,
   enrichDiscoveryEvent,
   GEMINI_DISCOVERY_MODEL,
   type EnrichDiscoveryEventOptions,
@@ -31,6 +32,9 @@ export * from "@/lib/event-discovery-types";
 const DISCOVERY_PROMPT_VERSION = "licensed-feeds-v1";
 const DEFAULT_LOOKAHEAD_DAYS = 180;
 const DEFAULT_MAX_EVENTS = 40;
+const DEFAULT_GEMINI_RUN_BUDGET_MS = 25_000;
+const DISCOVERY_ROUTE_BUDGET_MS = 45_000;
+const MAX_GEMINI_RUN_BUDGET_MS = 30_000;
 const MAX_LOOKAHEAD_DAYS = 730;
 const MAX_EVENTS_PER_RUN = 500;
 
@@ -60,13 +64,18 @@ export type DiscoverEventCandidatesResult = {
 
 export type RunEventDiscoveryOptions = {
   allowedSourceHosts?: readonly DiscoveryAllowedHost[];
-  enrich?: EnrichDiscoveryEventOptions;
+  enrich?: EnrichDiscoveryCandidatesOptions;
   feedUrls?: readonly URL[];
   maxEvents?: number;
   now?: Date;
   requestedBy?: string | null;
   trigger: EventDiscoveryTrigger;
 };
+
+export type EnrichDiscoveryCandidatesOptions =
+  EnrichDiscoveryEventOptions & {
+    runBudgetMs?: number;
+  };
 
 export type RunEventDiscoveryResult =
   | {
@@ -287,21 +296,71 @@ function catalogCandidate(
   };
 }
 
-async function enrichCandidates(
+function deterministicEvent(
+  candidate: DiscoveryEventCandidate,
+): EnrichedDiscoveryEvent {
+  return {
+    ...candidate,
+    enrichedBy: "deterministic",
+    enrichment: deterministicDiscoveryEnrichment(candidate),
+  };
+}
+
+export async function enrichDiscoveryCandidates(
   candidates: readonly DiscoveryEventCandidate[],
-  options: EnrichDiscoveryEventOptions,
+  options: EnrichDiscoveryCandidatesOptions = {},
 ): Promise<readonly EnrichedDiscoveryEvent[]> {
   const enriched: EnrichedDiscoveryEvent[] = [];
+  const nowMs = options.nowMs ?? Date.now;
+  const requestedBudget = options.runBudgetMs;
+  const runBudgetMs =
+    typeof requestedBudget === "number" &&
+    Number.isFinite(requestedBudget) &&
+    requestedBudget > 0
+      ? Math.min(requestedBudget, MAX_GEMINI_RUN_BUDGET_MS)
+      : DEFAULT_GEMINI_RUN_BUDGET_MS;
+  const startedAt = nowMs();
+  const deadlineMs = Math.min(
+    startedAt + runBudgetMs,
+    options.deadlineMs ?? Number.POSITIVE_INFINITY,
+  );
+  const modelConfigured = Boolean(
+    (options.apiKey ?? process.env.GEMINI_API_KEY)?.trim(),
+  );
+  let circuitOpen = false;
 
   // Keep external-model concurrency deliberately low for predictable cost and
-  // rate-limit behavior during a scheduled run.
+  // rate-limit behavior during a scheduled run. Once a whole batch falls back
+  // or the run-wide budget expires, finish deterministically instead of
+  // stalling every remaining event during a provider outage.
   for (let index = 0; index < candidates.length; index += 3) {
     const batch = candidates.slice(index, index + 3);
-    enriched.push(
-      ...(await Promise.all(
-        batch.map((candidate) => enrichDiscoveryEvent(candidate, options)),
-      )),
+    if (
+      !modelConfigured ||
+      circuitOpen ||
+      nowMs() >= deadlineMs
+    ) {
+      enriched.push(...batch.map(deterministicEvent));
+      continue;
+    }
+
+    const batchResults = await Promise.all(
+      batch.map((candidate) =>
+        enrichDiscoveryEvent(candidate, {
+          ...options,
+          deadlineMs,
+        }),
+      ),
     );
+    enriched.push(...batchResults);
+
+    if (
+      batchResults.every(
+        (event) => event.enrichedBy === "deterministic",
+      )
+    ) {
+      circuitOpen = true;
+    }
   }
 
   return enriched;
@@ -310,6 +369,9 @@ async function enrichCandidates(
 export async function runEventDiscovery(
   options: RunEventDiscoveryOptions,
 ): Promise<RunEventDiscoveryResult> {
+  const routeClock = options.enrich?.nowMs ?? Date.now;
+  const routeDeadlineMs =
+    routeClock() + DISCOVERY_ROUTE_BUDGET_MS;
   const feedUrls = options.feedUrls ?? parseDiscoveryFeedUrls();
   if (feedUrls.length === 0) {
     return { status: "skipped", reason: "no-feeds" };
@@ -375,9 +437,16 @@ export async function runEventDiscovery(
         throw new Error("ALL_DISCOVERY_FEEDS_FAILED");
       }
 
-      const enriched = await enrichCandidates(
+      const enriched = await enrichDiscoveryCandidates(
         discovery.candidates,
-        options.enrich ?? {},
+        {
+          ...options.enrich,
+          deadlineMs: Math.min(
+            options.enrich?.deadlineMs ??
+              Number.POSITIVE_INFINITY,
+            routeDeadlineMs,
+          ),
+        },
       );
 
       for (const event of enriched) {
