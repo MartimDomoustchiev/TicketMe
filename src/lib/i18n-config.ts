@@ -2,9 +2,10 @@ export const SUPPORTED_LOCALES = ["bg", "en"] as const;
 export type Locale = (typeof SUPPORTED_LOCALES)[number];
 
 export const DEFAULT_LOCALE: Locale = "bg";
-export const LOCALE_COOKIE_NAME = "ticketforge_locale";
-export const LOCALE_HEADER_NAME = "x-ticketforge-locale";
-export const PUBLIC_URL_HEADER_NAME = "x-ticketforge-public-url";
+export const LOCALE_COOKIE_NAME = "ticketme_locale";
+export const LEGACY_LOCALE_COOKIE_NAME = "ticketforge_locale";
+export const LOCALE_HEADER_NAME = "x-ticketme-locale";
+export const PUBLIC_URL_HEADER_NAME = "x-ticketme-public-url";
 
 export function isLocale(value: unknown): value is Locale {
   return (
@@ -83,7 +84,7 @@ export function switchLocaleInHref(
   locale: Locale,
 ): string {
   try {
-    const url = new URL(href || "/", "https://ticketforge.local");
+    const url = new URL(href || "/", "https://ticketme.local");
     url.pathname = `/${locale}${stripLocale(url.pathname)}`;
 
     const returnPath = url.searchParams.get("next");

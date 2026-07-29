@@ -37,7 +37,7 @@ export function getStripeClient(): Stripe {
 
   stripeClient ??= new Stripe(secretKey, {
     appInfo: {
-      name: "TicketForge",
+      name: "TicketMe",
       version: "0.1.0",
     },
     maxNetworkRetries: 2,

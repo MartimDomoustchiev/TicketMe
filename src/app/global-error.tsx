@@ -30,7 +30,7 @@ export default function GlobalError({
         >
           <section>
             <h1>
-              TicketForge is temporarily unavailable / временно не е достъпен
+              TicketMe is temporarily unavailable / временно не е достъпен
             </h1>
             <p>
               Please try loading the page again. / Опитай да заредиш страницата

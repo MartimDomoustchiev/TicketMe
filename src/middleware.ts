@@ -2,6 +2,7 @@ import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 import {
   isLocale,
+  LEGACY_LOCALE_COOKIE_NAME,
   LOCALE_COOKIE_NAME,
   LOCALE_HEADER_NAME,
   localeFromAcceptLanguage,
@@ -20,7 +21,9 @@ export function middleware(request: NextRequest) {
   const pathLocale = localeFromPathname(pathname);
 
   if (!pathLocale) {
-    const cookieLocale = request.cookies.get(LOCALE_COOKIE_NAME)?.value;
+    const cookieLocale =
+      request.cookies.get(LOCALE_COOKIE_NAME)?.value ??
+      request.cookies.get(LEGACY_LOCALE_COOKIE_NAME)?.value;
     const locale = isLocale(cookieLocale)
       ? cookieLocale
       : localeFromAcceptLanguage(request.headers.get("accept-language"));
@@ -64,6 +67,9 @@ export function middleware(request: NextRequest) {
     maxAge: ONE_YEAR_SECONDS,
     path: "/",
   });
+  if (request.cookies.has(LEGACY_LOCALE_COOKIE_NAME)) {
+    response.cookies.delete(LEGACY_LOCALE_COOKIE_NAME);
+  }
 
   return response;
 }

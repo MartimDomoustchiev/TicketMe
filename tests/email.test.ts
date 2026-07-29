@@ -6,6 +6,7 @@ import path from "node:path";
 import { test } from "node:test";
 import {
   isEmailReadyForArbitraryRecipients,
+  normalizeMailFrom,
   sendVerificationEmail,
 } from "../src/lib/email";
 
@@ -36,16 +37,25 @@ test("Resend test-domain recipient restrictions fall back only in development", 
     path.join(os.tmpdir(), "ticketforge-email-"),
   );
   const outboxPath = path.join(testDirectory, "outbox.log");
-  const server = createServer((_request, response) => {
-    response.writeHead(403, { "content-type": "application/json" });
-    response.end(
-      JSON.stringify({
-        statusCode: 403,
-        name: "validation_error",
-        message:
-          "You can only send testing emails to your own email address (owner@example.com).",
-      }),
-    );
+  const requestBodies: string[] = [];
+  const server = createServer((request, response) => {
+    let body = "";
+    request.setEncoding("utf8");
+    request.on("data", (chunk) => {
+      body += chunk;
+    });
+    request.on("end", () => {
+      requestBodies.push(body);
+      response.writeHead(403, { "content-type": "application/json" });
+      response.end(
+        JSON.stringify({
+          statusCode: 403,
+          name: "validation_error",
+          message:
+            "You can only send testing emails to your own email address (owner@example.com).",
+        }),
+      );
+    });
   });
 
   await new Promise<void>((resolve) => {
@@ -78,8 +88,12 @@ test("Resend test-domain recipient restrictions fall back only in development", 
     assert.match(outbox, /role="presentation"/);
     assert.match(outbox, /Local &lt;Candidate&gt;/);
     assert.doesNotMatch(outbox, /Local <Candidate>/);
+    assert.equal(
+      JSON.parse(requestBodies[0])?.from,
+      "TicketMe <onboarding@resend.dev>",
+    );
 
-    setEnvironment("MAIL_FROM", "TicketForge <tickets@verified.example>");
+    setEnvironment("MAIL_FROM", "TicketMe <tickets@verified.example>");
     await assert.rejects(
       sendVerificationEmail({
         to: "candidate@example.com",
@@ -91,7 +105,7 @@ test("Resend test-domain recipient restrictions fall back only in development", 
     );
 
     setEnvironment("NODE_ENV", "production");
-    setEnvironment("MAIL_FROM", "TicketForge <onboarding@resend.dev>");
+    setEnvironment("MAIL_FROM", "TicketMe <onboarding@resend.dev>");
     await assert.rejects(
       sendVerificationEmail({
         to: "candidate@example.com",
@@ -112,6 +126,25 @@ test("Resend test-domain recipient restrictions fall back only in development", 
   }
 });
 
+test("sender normalization preserves the verified address and enforces the TicketMe brand", () => {
+  assert.equal(
+    normalizeMailFrom("TicketForge <tickets@mail.example.com>"),
+    "TicketMe <tickets@mail.example.com>",
+  );
+  assert.equal(
+    normalizeMailFrom("tickets@mail.example.com"),
+    "TicketMe <tickets@mail.example.com>",
+  );
+  assert.equal(
+    normalizeMailFrom("TicketMe <first@example.com>, second@example.com"),
+    null,
+  );
+  assert.equal(
+    normalizeMailFrom("TicketMe <tickets@example.com>\r\nBcc: bad@example.com"),
+    null,
+  );
+});
+
 test("arbitrary-recipient readiness requires a custom sender domain", () => {
   const previousEnvironment = Object.fromEntries(
     ENVIRONMENT_KEYS.map((key) => [key, process.env[key]]),
@@ -119,10 +152,10 @@ test("arbitrary-recipient readiness requires a custom sender domain", () => {
 
   try {
     setEnvironment("RESEND_API_KEY", "resend-local-test-key");
-    setEnvironment("MAIL_FROM", "TicketForge <onboarding@resend.dev>");
+    setEnvironment("MAIL_FROM", "TicketMe <onboarding@resend.dev>");
     assert.equal(isEmailReadyForArbitraryRecipients(), false);
 
-    setEnvironment("MAIL_FROM", "TicketForge <tickets@mail.example.com>");
+    setEnvironment("MAIL_FROM", "TicketMe <tickets@mail.example.com>");
     assert.equal(isEmailReadyForArbitraryRecipients(), true);
 
     setEnvironment("RESEND_API_KEY", undefined);

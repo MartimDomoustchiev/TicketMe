@@ -20,8 +20,10 @@ import { MarketplaceFooter } from "@/components/marketplace/MarketplaceFooter";
 import { MarketplaceHeader } from "@/components/marketplace/MarketplaceHeader";
 import {
   categoryLabel,
+  externalSourceLabel,
   formatEventDate,
   formatPrice,
+  formatVenueLocation,
   localizedEventDescription,
   localizedEventTagline,
   localizeCity,
@@ -34,6 +36,8 @@ import {
 } from "@/lib/catalog";
 import { getLocale, localizeHref } from "@/lib/i18n";
 import { getPublicAvailability } from "@/lib/public-availability";
+import { getBaseUrl } from "@/lib/site";
+import { getEventVisual } from "@/lib/event-visual";
 
 export const dynamic = "force-dynamic";
 
@@ -76,11 +80,14 @@ export default async function EventPage({ params }: EventPageProps) {
   }
 
   const internalSale = isInternallySoldEvent(event);
+  const visual = getEventVisual(event);
   const [availability, buyerSession, locale, relatedEvents] = await Promise.all([
     internalSale
       ? getPublicAvailability(event.id)
       : Promise.resolve(null),
-    getBuyerSession().catch(() => null),
+    internalSale
+      ? getBuyerSession().catch(() => null)
+      : Promise.resolve(null),
     getLocale(),
     listRelatedCatalogEvents(event),
   ]);
@@ -91,7 +98,7 @@ export default async function EventPage({ params }: EventPageProps) {
     "@type": "Event",
     name: event.title,
     description: localizedEventDescription(event, locale),
-    image: [event.heroImage],
+    image: [new URL(event.heroImage, getBaseUrl()).toString()],
     startDate: event.startsAt,
     eventStatus: "https://schema.org/EventScheduled",
     eventAttendanceMode: "https://schema.org/OfflineEventAttendanceMode",
@@ -170,9 +177,17 @@ export default async function EventPage({ params }: EventPageProps) {
           src={event.heroImage}
           alt=""
           fill
-          loading="eager"
+          preload
           sizes="100vw"
-          className="-z-20 object-cover object-center"
+          className="-z-20 object-cover"
+          style={{
+            filter: visual.imageFilter,
+            objectPosition: visual.objectPosition,
+          }}
+        />
+        <div
+          className="absolute inset-0 -z-10 opacity-75"
+          style={{ background: visual.overlay }}
         />
         <div className="absolute inset-0 -z-10 bg-[linear-gradient(90deg,rgba(16,23,42,0.98)_0%,rgba(16,23,42,0.88)_43%,rgba(16,23,42,0.38)_100%)]" />
         <div className="absolute inset-0 -z-10 bg-gradient-to-t from-[#10172a] via-transparent to-[#10172a]/20" />
@@ -221,33 +236,37 @@ export default async function EventPage({ params }: EventPageProps) {
                   className="text-blue-300"
                   aria-hidden="true"
                 />
-                {event.venue}, {localizeCity(event.city, locale)}
+                {formatVenueLocation(event, locale)}
               </span>
             </div>
           </div>
 
           <aside className="rounded-2xl border border-white/15 bg-white p-5 text-[#10172a] shadow-2xl shadow-black/25 sm:p-6">
             <p className="text-xs font-black uppercase tracking-wider text-slate-500">
-              {internalSale ? copy.ticketsFrom : copy.verifiedListing}
+              {internalSale
+                ? copy.ticketsFrom
+                : externalSourceLabel(event, locale)}
             </p>
             <p className="mt-1 text-3xl font-black tracking-[-0.03em]">
-              {formatPrice(event, locale)}
+              {internalSale || event.priceAvailable === true
+                ? formatPrice(event, locale)
+                : event.sourceName}
             </p>
             <div className="my-5 h-px bg-slate-200" />
-            <p className="flex items-center justify-between gap-4 text-sm">
-              <span className="font-semibold text-slate-500">
-                {internalSale ? copy.availability : copy.source}
-              </span>
-              <span className="font-black text-emerald-700">
-                {internalSale
-                  ? availability
+            {internalSale && (
+              <p className="flex items-center justify-between gap-4 text-sm">
+                <span className="font-semibold text-slate-500">
+                  {copy.availability}
+                </span>
+                <span className="font-black text-emerald-700">
+                  {availability
                     ? availability.totalRemaining > 0
                       ? copy.ticketsAvailable(availability.totalRemaining)
                       : copy.soldOut
-                    : copy.availabilityUnavailable
-                  : event.sourceName}
-              </span>
-            </p>
+                    : copy.availabilityUnavailable}
+                </span>
+              </p>
+            )}
             <a
               href={
                 internalSale
@@ -269,7 +288,11 @@ export default async function EventPage({ params }: EventPageProps) {
             </a>
             <p className="mt-4 flex items-center justify-center gap-2 text-xs font-bold text-slate-500">
               <ShieldCheck size={15} className="text-emerald-600" aria-hidden="true" />
-              {internalSale ? copy.secureVerified : copy.sourceVerified}
+              {internalSale
+                ? copy.secureVerified
+                : event.sourceOfficial
+                  ? copy.officialSourceLinked
+                  : copy.sourceLinked}
             </p>
           </aside>
         </div>
@@ -334,7 +357,7 @@ export default async function EventPage({ params }: EventPageProps) {
                 label={event.venue}
                 value={
                   locale === "en"
-                    ? `${event.venue}, ${localizeCity(event.city, locale)}`
+                    ? formatVenueLocation(event, locale)
                     : event.address
                 }
               />
@@ -386,10 +409,14 @@ export default async function EventPage({ params }: EventPageProps) {
               aria-hidden="true"
             />
             <h2 className="mt-4 text-2xl font-black">
-              {copy.externalEventTitle}
+              {event.sourceOfficial
+                ? copy.officialEventTitle
+                : copy.externalEventTitle}
             </h2>
             <p className="mx-auto mt-3 max-w-2xl leading-7 text-slate-600">
-              {copy.externalEventDescription}
+              {event.sourceOfficial
+                ? copy.officialEventDescription
+                : copy.externalEventDescription}
             </p>
             <a
               href={event.sourceUrl}
@@ -495,7 +522,6 @@ const EVENT_COPY = {
     allEvents: "Всички събития",
     hourSuffix: "ч.",
     ticketsFrom: "Билети от",
-    verifiedListing: "Проверено външно събитие",
     availability: "Наличност",
     source: "Източник",
     ticketsAvailable: (count: number) => `${count} билета`,
@@ -505,10 +531,14 @@ const EVENT_COPY = {
     backToEvents: "Разгледай събитията",
     openOfficialPage: "Отвори източника",
     secureVerified: "Сигурна заявка и потвърден имейл",
-    sourceVerified: "Данните са свързани с оригиналния източник",
-    externalEventTitle: "Цени и билети от оригиналния източник",
+    officialSourceLinked: "Официален източник на събитието",
+    sourceLinked: "Данните са свързани с посочения източник",
+    officialEventTitle: "Цени и билети от официалния източник",
+    officialEventDescription:
+      "TicketMe показва това събитие за откриване и не продава билети за него. Проверете актуалните цени, наличност и условия в официалния източник.",
+    externalEventTitle: "Цени и билети от източника на събитието",
     externalEventDescription:
-      "TicketForge показва това събитие за откриване и не продава билети за него. Проверете актуалните цени, наличност и условия в официалния източник.",
+      "TicketMe показва това събитие за откриване и не продава билети за него. Проверете актуалните цени, наличност и условия в посочения външен източник.",
     salesPausedTitle: "Продажбата е временно поставена на пауза",
     salesPausedDescription:
       "Пазим системата честна и не приемаме поръчки, докато не можем да потвърдим наличността. Опитай отново след малко.",
@@ -534,7 +564,6 @@ const EVENT_COPY = {
     allEvents: "All events",
     hourSuffix: "",
     ticketsFrom: "Tickets from",
-    verifiedListing: "Verified external event",
     availability: "Availability",
     source: "Source",
     ticketsAvailable: (count: number) =>
@@ -545,10 +574,14 @@ const EVENT_COPY = {
     backToEvents: "Browse events",
     openOfficialPage: "Open event source",
     secureVerified: "Secure booking and verified email",
-    sourceVerified: "Details are linked to the original source",
-    externalEventTitle: "Prices and tickets from the original source",
+    officialSourceLinked: "Official event source",
+    sourceLinked: "Details are linked to the attributed source",
+    officialEventTitle: "Prices and tickets from the official source",
+    officialEventDescription:
+      "TicketMe lists this event for discovery and does not sell its tickets. Check current prices, availability and conditions on the official source.",
+    externalEventTitle: "Prices and tickets from the event source",
     externalEventDescription:
-      "TicketForge lists this event for discovery and does not sell its tickets. Check current prices, availability and conditions on the official source.",
+      "TicketMe lists this event for discovery and does not sell its tickets. Check current prices, availability and conditions on the linked external source.",
     salesPausedTitle: "Ticket sales are temporarily paused",
     salesPausedDescription:
       "To keep allocation fair, we do not accept orders while live inventory cannot be confirmed. Please try again shortly.",

@@ -9,12 +9,12 @@ export async function generateMetadata(): Promise<Metadata> {
     ? {
         title: "Privacy",
         description:
-          "How TicketForge handles personal data and essential cookies.",
+          "How TicketMe handles personal data and essential cookies.",
       }
     : {
         title: "Поверителност",
         description:
-          "Информация за обработването на лични данни и бисквитки в TicketForge.",
+          "Информация за обработването на лични данни и бисквитки в TicketMe.",
       };
 }
 
@@ -93,7 +93,7 @@ const PRIVACY_COPY = {
       "Достъпът до билетите е ограничен до потвърдения собственик и оторизиран организатор. Данните се пазят за периода, необходим за обслужване на събитието, сигурност и отчетност.",
     cookiesTitle: "Бисквитки",
     cookies:
-      "TicketForge използва строго необходими, защитени сесийни бисквитки за вход и авторизация. Те не се използват за рекламно проследяване и изтичат автоматично.",
+      "TicketMe използва строго необходими, защитени сесийни бисквитки за вход и авторизация. Те не се използват за рекламно проследяване и изтичат автоматично.",
     rightsTitle: "Вашите права",
     rights:
       "Можете да поискате информация, корекция или изтриване на личните си данни, когато приложимото законодателство позволява това. Някои записи могат да бъдат запазени за сигурност и изпълнение на законови задължения.",
@@ -116,7 +116,7 @@ const PRIVACY_COPY = {
       "Ticket access is restricted to the verified owner and an authorized organizer. Data is retained for as long as needed to operate the event, maintain security and provide an audit record.",
     cookiesTitle: "Cookies",
     cookies:
-      "TicketForge uses strictly necessary, secure session cookies for sign-in and authorization. They are not used for advertising tracking and expire automatically.",
+      "TicketMe uses strictly necessary, secure session cookies for sign-in and authorization. They are not used for advertising tracking and expire automatically.",
     rightsTitle: "Your rights",
     rights:
       "You may request access, correction or deletion of your personal data where applicable law permits. Some records may be retained for security and legal obligations.",

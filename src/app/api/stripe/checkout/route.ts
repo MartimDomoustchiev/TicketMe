@@ -1,5 +1,9 @@
 import { getBuyerSession } from "@/lib/auth";
-import { getEventById, isTicketTypeId } from "@/lib/event";
+import {
+  getEventById,
+  isEventOpenForInternalSale,
+  isTicketTypeId,
+} from "@/lib/event";
 import { consumeRateLimit, requestIdentity } from "@/lib/rate-limit";
 import { getBaseUrl } from "@/lib/site";
 import {
@@ -87,7 +91,11 @@ export async function POST(request: Request) {
   const ticketTypeId = body?.ticketType;
   const event = getEventById(eventId);
 
-  if (!event || !isTicketTypeId(ticketTypeId)) {
+  if (
+    !event ||
+    !isEventOpenForInternalSale(event) ||
+    !isTicketTypeId(ticketTypeId)
+  ) {
     return checkoutError(errorCopy.eventUnavailable, 404);
   }
 

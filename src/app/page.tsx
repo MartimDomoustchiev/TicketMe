@@ -2,14 +2,13 @@ import {
   ArrowRight,
   CalendarDays,
   CircleAlert,
-  MailCheck,
+  ExternalLink,
   MapPin,
   Radio,
   Search,
   ShieldCheck,
   Sparkles,
   Ticket,
-  UsersRound,
 } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
@@ -26,28 +25,41 @@ import {
   localizeCity,
 } from "@/components/marketplace/catalog-ui";
 import {
-  EVENT,
   EVENT_CATEGORIES,
+  formatDualCurrencyPrice,
+  getCategoryImage,
+  isEventOpenForInternalSale,
   type EventCategory,
 } from "@/lib/event";
 import { listCatalogEvents } from "@/lib/catalog";
+import { getEventVisual } from "@/lib/event-visual";
 import { getLocale, localizeHref } from "@/lib/i18n";
 import { getPublicAvailability } from "@/lib/public-availability";
 
 export const dynamic = "force-dynamic";
 
 export default async function Home() {
-  const [availability, locale, catalogEvents] = await Promise.all([
-    getPublicAvailability(EVENT.id),
+  const [locale, catalogEvents] = await Promise.all([
     getLocale(),
     listCatalogEvents(),
   ]);
   const copy = HOME_COPY[locale];
-  const featuredEvents = catalogEvents
-    .toSorted(
-      (left, right) => eventTimestamp(left) - eventTimestamp(right),
-    )
-    .slice(0, 8);
+  const popularEvents = catalogEvents.toSorted(
+    (left, right) =>
+      Number(Boolean(right.featured)) - Number(Boolean(left.featured)) ||
+      (right.bangerScore ?? 0) - (left.bangerScore ?? 0) ||
+      eventTimestamp(left) - eventTimestamp(right),
+  );
+  const featuredEvents = popularEvents.slice(0, 8);
+  const heroEvent = featuredEvents[0];
+  const internalSale = heroEvent
+    ? isEventOpenForInternalSale(heroEvent)
+    : false;
+  const availability =
+    internalSale && heroEvent
+      ? await getPublicAvailability(heroEvent.id)
+      : null;
+  const heroVisual = heroEvent ? getEventVisual(heroEvent) : null;
   const categoryCards = EVENT_CATEGORIES.map((category) => {
     const events = catalogEvents.filter(
       (event) => event.category === category,
@@ -55,7 +67,7 @@ export default async function Home() {
     return {
       category,
       count: events.length,
-      image: events[0]?.image ?? EVENT.image,
+      image: events[0]?.image ?? getCategoryImage(category),
     };
   })
     .filter((item) => item.count > 0)
@@ -77,15 +89,26 @@ export default async function Home() {
     >
       <MarketplaceHeader />
 
+      {heroEvent ? (
       <section className="relative isolate overflow-hidden bg-[#10172a] text-white">
         <Image
-          src={EVENT.heroImage}
+          src={heroEvent.heroImage}
           alt=""
           fill
-          loading="eager"
+          preload
           sizes="100vw"
-          className="-z-30 object-cover object-center"
+          className="-z-30 object-cover"
+          style={{
+            filter: heroVisual?.imageFilter,
+            objectPosition: heroVisual?.objectPosition,
+          }}
         />
+        {heroVisual && (
+          <div
+            className="absolute inset-0 -z-20 opacity-75"
+            style={{ background: heroVisual.overlay }}
+          />
+        )}
         <div className="absolute inset-0 -z-20 bg-[linear-gradient(90deg,rgba(16,23,42,0.98)_0%,rgba(16,23,42,0.9)_43%,rgba(16,23,42,0.38)_100%)]" />
         <div className="absolute inset-0 -z-10 bg-[radial-gradient(circle_at_78%_18%,rgba(36,87,255,0.28),transparent_30%),linear-gradient(0deg,rgba(16,23,42,0.65),transparent_45%)]" />
 
@@ -96,10 +119,10 @@ export default async function Home() {
               {copy.weeklyHighlight}
             </p>
             <h1 className="mt-6 text-5xl font-black leading-[0.98] tracking-[-0.055em] sm:text-7xl lg:text-[5.3rem]">
-              {EVENT.title}
+              {heroEvent.title}
             </h1>
             <p className="mt-6 max-w-2xl text-lg font-medium leading-8 text-slate-200 sm:text-xl">
-              {localizedEventTagline(EVENT, locale)}
+              {localizedEventTagline(heroEvent, locale)}
             </p>
 
             <div className="mt-8 flex flex-wrap gap-3 text-sm font-bold">
@@ -109,7 +132,7 @@ export default async function Home() {
                   className="text-blue-300"
                   aria-hidden="true"
                 />
-                {formatEventDate(EVENT, false, locale)}
+                {formatEventDate(heroEvent, false, locale)}
               </span>
               <span className="inline-flex items-center gap-2 rounded-xl bg-white/10 px-3.5 py-2.5 ring-1 ring-white/15 backdrop-blur">
                 <MapPin
@@ -117,28 +140,46 @@ export default async function Home() {
                   className="text-blue-300"
                   aria-hidden="true"
                 />
-                {EVENT.venue}, {localizeCity(EVENT.city, locale)}
+                {heroEvent.venue}, {localizeCity(heroEvent.city, locale)}
               </span>
             </div>
 
             <div className="mt-8 flex flex-wrap items-center gap-3">
-              <Link
-                href={
-                  availability
-                    ? `${eventHref(EVENT, locale)}#tickets`
-                    : eventHref(EVENT, locale)
-                }
-                className="inline-flex h-13 items-center justify-center gap-2 rounded-xl bg-[#2457ff] px-6 font-black text-white shadow-[0_14px_35px_rgba(36,87,255,0.35)] transition hover:-translate-y-0.5 hover:bg-blue-700 focus-visible:ring-4 focus-visible:ring-blue-300"
-              >
-                {availability ? copy.chooseTickets : copy.moreInformation}
-                <ArrowRight size={19} aria-hidden="true" />
-              </Link>
-              <Link
-                href={eventHref(EVENT, locale)}
-                className="inline-flex h-13 items-center justify-center rounded-xl border border-white/25 bg-white/5 px-6 font-black text-white transition hover:bg-white/12"
-              >
-                {copy.moreInformation}
-              </Link>
+              {internalSale ? (
+                <Link
+                  href={
+                    availability
+                      ? `${eventHref(heroEvent, locale)}#tickets`
+                      : eventHref(heroEvent, locale)
+                  }
+                  className="inline-flex h-13 items-center justify-center gap-2 rounded-xl bg-[#2457ff] px-6 font-black text-white shadow-[0_14px_35px_rgba(36,87,255,0.35)] transition hover:-translate-y-0.5 hover:bg-blue-700 focus-visible:ring-4 focus-visible:ring-blue-300"
+                >
+                  {availability
+                    ? copy.chooseTickets
+                    : copy.moreInformation}
+                  <ArrowRight size={19} aria-hidden="true" />
+                </Link>
+              ) : (
+                <a
+                  href={heroEvent.sourceUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex h-13 items-center justify-center gap-2 rounded-xl bg-[#2457ff] px-6 font-black text-white shadow-[0_14px_35px_rgba(36,87,255,0.35)] transition hover:-translate-y-0.5 hover:bg-blue-700 focus-visible:ring-4 focus-visible:ring-blue-300"
+                >
+                  {heroEvent.sourceOfficial
+                    ? copy.openOfficialPage
+                    : copy.openSourcePage}
+                  <ExternalLink size={18} aria-hidden="true" />
+                </a>
+              )}
+              {(availability || !internalSale) && (
+                <Link
+                  href={eventHref(heroEvent, locale)}
+                  className="inline-flex h-13 items-center justify-center rounded-xl border border-white/25 bg-white/5 px-6 font-black text-white transition hover:bg-white/12"
+                >
+                  {copy.moreInformation}
+                </Link>
+              )}
             </div>
           </div>
 
@@ -146,10 +187,16 @@ export default async function Home() {
             <div className="flex items-start justify-between gap-4">
               <div>
                 <p className="text-xs font-black uppercase tracking-wider text-slate-500">
-                  {copy.ticketsFrom}
+                  {internalSale
+                    ? copy.ticketsFrom
+                    : heroEvent.sourceOfficial
+                      ? copy.officialListing
+                      : copy.sourceListing}
                 </p>
                 <p className="mt-1 text-3xl font-black tracking-[-0.04em]">
-                  {formatPrice(EVENT, locale)}
+                  {internalSale
+                    ? formatPrice(heroEvent, locale)
+                    : heroEvent.sourceName}
                 </p>
               </div>
               <span className="inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-blue-50 text-[#2457ff]">
@@ -158,65 +205,116 @@ export default async function Home() {
             </div>
 
             <div className="my-5 h-px bg-slate-200" />
-            <div className="grid gap-3">
-              {EVENT.ticketTypes.map((type) => (
-                <div
-                  key={type.id}
-                  className="flex items-center justify-between gap-4 text-sm"
-                >
-                  <span className="inline-flex items-center gap-2 font-bold text-slate-600">
-                    <span
-                      className="h-2.5 w-2.5 rounded-full"
-                      style={{ backgroundColor: type.accent }}
-                    />
-                    {type.label}
-                  </span>
-                  <span className="font-black text-slate-950">
-                    {new Intl.NumberFormat(
-                      locale === "en" ? "en-GB" : "bg-BG",
-                      {
-                        style: "currency",
-                        currency: type.currency,
-                        maximumFractionDigits: 2,
-                      },
-                    ).format(type.price)}
-                  </span>
+            {internalSale ? (
+              <>
+                <div className="grid gap-3">
+                  {heroEvent.ticketTypes.map((type) => (
+                    <div
+                      key={type.id}
+                      className="flex items-center justify-between gap-4 text-sm"
+                    >
+                      <span className="inline-flex items-center gap-2 font-bold text-slate-600">
+                        <span
+                          className="h-2.5 w-2.5 rounded-full"
+                          style={{ backgroundColor: type.accent }}
+                        />
+                        {type.label}
+                      </span>
+                      <span className="font-black text-slate-950">
+                        {formatDualCurrencyPrice(type.price, locale)}
+                      </span>
+                    </div>
+                  ))}
                 </div>
-              ))}
-            </div>
 
-            <div
-              className={`mt-5 rounded-2xl p-4 ${
-                availability ? "bg-emerald-50" : "bg-amber-50"
-              }`}
-            >
-              <p
-                className={`flex items-center gap-2 text-sm font-black ${
-                  availability ? "text-emerald-900" : "text-amber-950"
-                }`}
-              >
-                {availability ? (
-                  <Radio size={16} aria-hidden="true" />
-                ) : (
-                  <CircleAlert size={16} aria-hidden="true" />
-                )}
-                {availability
-                  ? copy.availableTickets(availability.totalRemaining)
-                  : copy.availabilityUnavailable}
-              </p>
-              <p
-                className={`mt-1 text-xs leading-5 ${
-                  availability ? "text-emerald-800" : "text-amber-800"
-                }`}
-              >
-                {availability
-                  ? copy.liveAvailability
-                  : copy.availabilityUnavailableText}
-              </p>
-            </div>
+                <div
+                  className={`mt-5 rounded-2xl p-4 ${
+                    availability ? "bg-emerald-50" : "bg-amber-50"
+                  }`}
+                >
+                  <p
+                    className={`flex items-center gap-2 text-sm font-black ${
+                      availability
+                        ? "text-emerald-900"
+                        : "text-amber-950"
+                    }`}
+                  >
+                    {availability ? (
+                      <Radio size={16} aria-hidden="true" />
+                    ) : (
+                      <CircleAlert size={16} aria-hidden="true" />
+                    )}
+                    {availability
+                      ? copy.availableTickets(
+                          availability.totalRemaining,
+                        )
+                      : copy.availabilityUnavailable}
+                  </p>
+                  <p
+                    className={`mt-1 text-xs leading-5 ${
+                      availability
+                        ? "text-emerald-800"
+                        : "text-amber-800"
+                    }`}
+                  >
+                    {availability
+                      ? copy.liveAvailability
+                      : copy.availabilityUnavailableText}
+                  </p>
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="rounded-2xl bg-blue-50 p-4 text-blue-950">
+                  <p className="flex items-center gap-2 text-sm font-black">
+                    <ShieldCheck size={17} aria-hidden="true" />
+                    {heroEvent.sourceOfficial
+                      ? copy.sourceVerified
+                      : copy.sourceAttributed}
+                  </p>
+                  <p className="mt-1 text-xs leading-5 text-blue-800">
+                    {copy.externalAvailability}
+                  </p>
+                </div>
+                <a
+                  href={heroEvent.sourceUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="mt-4 inline-flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-[#10172a] px-5 text-sm font-black text-white transition hover:bg-[#2457ff]"
+                >
+                  {heroEvent.sourceOfficial
+                    ? copy.openOfficialPage
+                    : copy.openSourcePage}
+                  <ExternalLink size={16} aria-hidden="true" />
+                </a>
+              </>
+            )}
           </aside>
         </div>
       </section>
+      ) : (
+        <section className="relative overflow-hidden bg-[#10172a] px-4 py-24 text-white sm:py-32">
+          <div className="absolute inset-0 bg-[radial-gradient(circle_at_78%_18%,rgba(36,87,255,0.4),transparent_32%),radial-gradient(circle_at_14%_90%,rgba(255,107,53,0.2),transparent_28%)]" />
+          <div className="relative mx-auto max-w-7xl">
+            <p className="text-xs font-black uppercase tracking-[0.16em] text-blue-300">
+              TicketMe
+            </p>
+            <h1 className="mt-4 max-w-3xl text-5xl font-black leading-[1.02] tracking-[-0.05em] sm:text-7xl">
+              {copy.emptyHeroTitle}
+            </h1>
+            <p className="mt-5 max-w-2xl text-lg leading-8 text-slate-300">
+              {copy.emptyHeroText}
+            </p>
+            <Link
+              href={localizeHref(locale, "/events")}
+              className="mt-8 inline-flex h-13 items-center justify-center gap-2 rounded-xl bg-[#2457ff] px-6 font-black text-white transition hover:bg-blue-700"
+            >
+              {copy.browseCalendar}
+              <ArrowRight size={19} aria-hidden="true" />
+            </Link>
+          </div>
+        </section>
+      )}
 
       <section className="relative z-10 -mt-6 px-4">
         <form
@@ -254,7 +352,7 @@ export default async function Home() {
           <div className="flex flex-wrap items-end justify-between gap-4">
             <div>
               <p className="text-xs font-black uppercase tracking-[0.16em] text-[#2457ff]">
-                {copy.selectedForYou}
+                {copy.popularNow}
               </p>
               <h2 className="mt-2 text-3xl font-black tracking-[-0.04em] sm:text-4xl">
                 {copy.upcomingEvents}
@@ -366,17 +464,17 @@ export default async function Home() {
               text={copy.secureRequestText}
             />
             <TrustCard
-              icon={<UsersRound size={21} />}
+              icon={<CircleAlert size={21} />}
               title={copy.fairQueue}
               text={copy.fairQueueText}
             />
             <TrustCard
-              icon={<MailCheck size={21} />}
+              icon={<CalendarDays size={21} />}
               title={copy.emailDelivery}
               text={copy.emailDeliveryText}
             />
             <TrustCard
-              icon={<Radio size={21} />}
+              icon={<Ticket size={21} />}
               title={copy.liveInventory}
               text={copy.liveInventoryText}
             />
@@ -450,6 +548,14 @@ const HOME_COPY = {
     chooseTickets: "Избери билети",
     moreInformation: "Повече информация",
     ticketsFrom: "Билети от",
+    officialListing: "Официален източник",
+    sourceListing: "Източник на събитието",
+    sourceVerified: "Данните са свързани с официалния източник",
+    sourceAttributed: "Обявата е свързана с посочения източник",
+    externalAvailability:
+      "Актуалните цени, наличност и условия се потвърждават на страницата на организатора.",
+    openOfficialPage: "Към официалната страница",
+    openSourcePage: "Към източника",
     availableTickets: (count: number) => `${count} билета са налични`,
     liveAvailability:
       "Наличността се актуализира в реално време при избор на билет.",
@@ -458,7 +564,7 @@ const HOME_COPY = {
       "Разглеждането работи, но продажбата е временно поставена на пауза.",
     searchPlaceholder: "Търси събитие, артист или място",
     findEvent: "Намери събитие",
-    selectedForYou: "Избрано за теб",
+    popularNow: "Популярно сега",
     upcomingEvents: "Предстоящи събития",
     viewAll: "Виж всички",
     browseByInterest: "Разгледай по интереси",
@@ -467,22 +573,26 @@ const HOME_COPY = {
       "От големи концерти до семейни спектакли — открий точното преживяване за своя календар.",
     soonInCity: "Скоро в града",
     allEventsInSofia: "Всички събития в София",
-    confidenceEyebrow: "Спокойствие при всяка поръчка",
-    confidenceTitle: "От избора до входа на събитието",
+    emptyHeroTitle: "Следващото голямо събитие започва тук",
+    emptyHeroText:
+      "Календарът се обновява с нови дати от разрешени източници. Разгледай категориите или се върни скоро.",
+    browseCalendar: "Разгледай календара",
+    confidenceEyebrow: "Прозрачност по дизайн",
+    confidenceTitle: "Знаеш откъде идва всяка обява",
     confidenceText:
-      "Потвърден профил, актуална наличност и електронен билет, достъпен винаги от твоя акаунт.",
-    secureRequest: "Защитена заявка",
+      "TicketMe различава ясно външните listings от събитията, продавани директно в платформата.",
+    secureRequest: "Ясно посочен източник",
     secureRequestText:
-      "Билетите се разпределят атомарно без двойна продажба.",
-    fairQueue: "Честна опашка",
+      "Всяка външна обява води до атрибутирания източник на събитието.",
+    fairQueue: "Без измислена наличност",
     fairQueueText:
-      "Заявките се обслужват последователно по реда на постъпване.",
-    emailDelivery: "Доставка по имейл",
+      "Цена и свободни места се показват само когато идват от проверим source.",
+    emailDelivery: "Само бъдещи дати",
     emailDeliveryText:
-      "PDF билетът се изпраща веднага след успешна поръчка.",
-    liveInventory: "Наличност на живо",
+      "Изтеклите събития автоматично отпадат от каталога и директните страници.",
+    liveInventory: "Защитена директна продажба",
     liveInventoryText:
-      "Бройките се обновяват автоматично без презареждане.",
+      "Checkout, опашка и PDF билет се активират само за одобрен organizer inventory.",
     eventsStat: "предстоящи събития",
     citiesStat: "града в календара",
     accessStat: "достъп до твоите билети",
@@ -492,6 +602,14 @@ const HOME_COPY = {
     chooseTickets: "Choose tickets",
     moreInformation: "More information",
     ticketsFrom: "Tickets from",
+    officialListing: "Official source",
+    sourceListing: "Event source",
+    sourceVerified: "Details are linked to the official source",
+    sourceAttributed: "The listing is linked to its attributed source",
+    externalAvailability:
+      "Current prices, availability and conditions are confirmed on the organizer’s page.",
+    openOfficialPage: "Open official page",
+    openSourcePage: "Open event source",
     availableTickets: (count: number) =>
       `${count} ${count === 1 ? "ticket is" : "tickets are"} available`,
     liveAvailability:
@@ -501,7 +619,7 @@ const HOME_COPY = {
       "Browsing remains available while ticket sales are temporarily paused.",
     searchPlaceholder: "Search by event, artist or venue",
     findEvent: "Find an event",
-    selectedForYou: "Selected for you",
+    popularNow: "Popular right now",
     upcomingEvents: "Upcoming events",
     viewAll: "View all",
     browseByInterest: "Browse by interest",
@@ -510,22 +628,26 @@ const HOME_COPY = {
       "From major concerts to family shows — find the right experience for your calendar.",
     soonInCity: "Coming to the city",
     allEventsInSofia: "All events in Sofia",
-    confidenceEyebrow: "Confidence with every order",
-    confidenceTitle: "From selection to event admission",
+    emptyHeroTitle: "Your next standout event starts here",
+    emptyHeroText:
+      "The calendar is refreshing with new dates from authorized sources. Browse the categories or check back soon.",
+    browseCalendar: "Browse the calendar",
+    confidenceEyebrow: "Transparency by design",
+    confidenceTitle: "Know where every listing comes from",
     confidenceText:
-      "A verified account, live availability and an e-ticket that is always accessible from your account.",
-    secureRequest: "Secure booking",
+      "TicketMe clearly separates external discovery listings from events sold directly on the platform.",
+    secureRequest: "Clearly attributed sources",
     secureRequestText:
-      "Tickets are allocated atomically, preventing duplicate sales.",
-    fairQueue: "Fair queue",
+      "Every external listing links to its attributed event source.",
+    fairQueue: "No invented availability",
     fairQueueText:
-      "Requests are handled sequentially in the order they arrive.",
-    emailDelivery: "Email delivery",
+      "Prices and remaining tickets appear only when backed by a verifiable source.",
+    emailDelivery: "Future dates only",
     emailDeliveryText:
-      "Your PDF ticket is sent immediately after a successful order.",
-    liveInventory: "Live availability",
+      "Expired events automatically leave the catalogue and direct pages.",
+    liveInventory: "Protected direct sales",
     liveInventoryText:
-      "Ticket quantities update automatically without refreshing the page.",
+      "Checkout, fair allocation and PDF tickets activate only for approved organizer inventory.",
     eventsStat: "upcoming events",
     citiesStat: "cities in the calendar",
     accessStat: "access to your tickets",

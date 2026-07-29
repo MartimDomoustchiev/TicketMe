@@ -165,7 +165,7 @@ async function deliverVerification(
 }
 
 function localVerificationHref(verificationHref: string): string {
-  const url = new URL(verificationHref, "http://local.ticketforge");
+  const url = new URL(verificationHref, "http://local.ticketme");
   url.searchParams.set("delivery", "local");
   return `${url.pathname}${url.search}`;
 }

@@ -13,7 +13,11 @@ import {
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import type { BuyerSession } from "@/lib/auth";
-import type { CatalogEvent, TicketTypeId } from "@/lib/event";
+import {
+  formatDualCurrencyPrice,
+  type CatalogEvent,
+  type TicketTypeId,
+} from "@/lib/event";
 import type { Availability } from "@/lib/store";
 
 type Props = {
@@ -35,6 +39,7 @@ const COPY = {
     electronicTicket: "Електронен PDF билет",
     total: "Общо",
     remaining: "билета остават за събитието",
+    soldProgress: "Продадени билети",
     verifiedEmail: "Потвърден имейл",
     redirecting: "Отваряме сигурното плащане…",
     checkout: "Продължи към плащане",
@@ -44,10 +49,9 @@ const COPY = {
     secureIssuing: "Сигурно издаване",
     liveAvailability: "Жива наличност",
     processedBy: "Плащането се обработва сигурно от Stripe",
-    paymentOptions: "Гъвкави начини за плащане",
+    paymentOptions: "Карта и допустими дигитални портфейли",
     walletHint:
-      "Поддържани чрез Stripe Checkout; показват се, когато са активирани и устройството, държавата и портфейлът са допустими.",
-    card: "Карта",
+      "Stripe Checkout показва само методите, налични за твоето устройство, държава и настройките на портфейла.",
     agreementStart: "С продължаването приемаш",
     terms: "Условията",
     and: "и",
@@ -66,6 +70,7 @@ const COPY = {
     electronicTicket: "Electronic PDF ticket",
     total: "Total",
     remaining: "tickets left for this event",
+    soldProgress: "Tickets sold",
     verifiedEmail: "Verified email",
     redirecting: "Opening secure checkout…",
     checkout: "Continue to payment",
@@ -75,10 +80,9 @@ const COPY = {
     secureIssuing: "Secure ticketing",
     liveAvailability: "Live availability",
     processedBy: "Secure payment processing by Stripe",
-    paymentOptions: "Flexible ways to pay",
+    paymentOptions: "Card and eligible digital wallets",
     walletHint:
-      "Supported through Stripe Checkout; shown when enabled and the device, country, and wallet are eligible.",
-    card: "Card",
+      "Stripe Checkout only shows methods available for your device, country, and wallet setup.",
     agreementStart: "By continuing, you accept the",
     terms: "Terms",
     and: "and",
@@ -163,17 +167,10 @@ export function TicketDesk({
   );
   const selectedRemaining = availability.byType[selectedType] ?? 0;
   const selectedTicketCopy = TICKET_COPY[locale][selectedTicket.id];
-  const priceFormatter = useMemo(
-    () =>
-      new Intl.NumberFormat(locale === "bg" ? "bg-BG" : "en-GB", {
-        style: "currency",
-        currency: selectedTicket.currency,
-        minimumFractionDigits: 0,
-        maximumFractionDigits: 2,
-      }),
-    [locale, selectedTicket.currency],
+  const selectedPrice = formatDualCurrencyPrice(
+    selectedTicket.price,
+    locale,
   );
-  const selectedPrice = priceFormatter.format(selectedTicket.price);
   const soldPercent =
     availability.totalCapacity > 0
       ? Math.round(
@@ -280,15 +277,7 @@ export function TicketDesk({
                   </span>
                   <span className="shrink-0 text-right">
                     <span className="block text-xl font-black text-slate-950">
-                      {new Intl.NumberFormat(
-                        locale === "bg" ? "bg-BG" : "en-GB",
-                        {
-                          style: "currency",
-                          currency: type.currency,
-                          minimumFractionDigits: 0,
-                          maximumFractionDigits: 2,
-                        },
-                      ).format(type.price)}
+                      {formatDualCurrencyPrice(type.price, locale)}
                     </span>
                     <span className="mt-1 block text-xs font-bold text-slate-500">
                       {isSoldOut
@@ -340,7 +329,7 @@ export function TicketDesk({
 
           <div
             role="progressbar"
-            aria-label="Продадени билети"
+            aria-label={copy.soldProgress}
             aria-valuemin={0}
             aria-valuemax={100}
             aria-valuenow={soldPercent}
@@ -390,20 +379,7 @@ export function TicketDesk({
                   />
                   {copy.paymentOptions}
                 </p>
-                <div
-                  aria-label={copy.paymentOptions}
-                  className="mt-2.5 flex flex-wrap justify-center gap-1.5"
-                >
-                  {[copy.card, "Apple Pay", "Google Pay"].map((method) => (
-                    <span
-                      key={method}
-                      className="rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-black text-slate-700 shadow-sm"
-                    >
-                      {method}
-                    </span>
-                  ))}
-                </div>
-                <p className="mt-2.5 text-center text-[11px] leading-4 text-slate-500">
+                <p className="mt-2 text-center text-[11px] leading-4 text-slate-500">
                   {copy.walletHint}
                 </p>
               </div>

@@ -43,6 +43,8 @@ export type CatalogEvent = {
   time: string;
   priceFrom: number;
   priceLabel: string;
+  /** Whether priceFrom came from a real organizer/source price. */
+  priceAvailable?: boolean;
   currency: CurrencyCode;
   image: string;
   heroImage: string;
@@ -50,12 +52,19 @@ export type CatalogEvent = {
   sourceName: string;
   sourceUrl: string;
   /**
-   * Internal events are sold by TicketForge. External events are discovery
-   * listings and always send the visitor to the verified organizer source.
+   * Internal events are sold by the platform. External events are discovery
+   * listings and always send the visitor to their attributed source.
    */
   saleMode?: EventSaleMode;
+  /**
+   * True only when the attributed URL is known to be an official event or
+   * organizer source. Ticket marketplaces and unverified feeds stay false.
+   */
+  sourceOfficial?: boolean;
   aiEnhanced?: boolean;
   featured?: boolean;
+  /** Editorial/AI ranking signal from 0 to 100; never a commerce fact. */
+  bangerScore?: number;
 };
 
 export const CATEGORY_LABELS: Readonly<Record<EventCategory, string>> = {
@@ -71,11 +80,14 @@ export const CATEGORY_LABELS: Readonly<Record<EventCategory, string>> = {
 
 const SOFIA_TIME_ZONE = "Europe/Sofia";
 const EUR_CURRENCY: CurrencyCode = "EUR";
-
-// Bulgaria adopted the euro at the irrevocably fixed conversion rate below.
-// The imported event snapshot used legacy BGN price points, so normalize them
-// once at the catalogue boundary and keep all application/Stripe amounts EUR.
 export const BGN_PER_EUR = 1.95583;
+
+const DUAL_PRICE_DISPLAY_START = Date.parse(
+  "2025-08-08T00:00:00+03:00",
+);
+const DUAL_PRICE_DISPLAY_END = Date.parse(
+  "2026-08-09T00:00:00+03:00",
+);
 
 const DATE_FORMATTER = new Intl.DateTimeFormat("bg-BG", {
   day: "numeric",
@@ -98,63 +110,15 @@ const PRICE_FORMATTER = new Intl.NumberFormat("bg-BG", {
   maximumFractionDigits: 2,
 });
 
-const IMAGE_POOL: Readonly<Record<EventCategory, readonly string[]>> = {
-  Concerts: [
-    "https://images.unsplash.com/photo-1501386761578-eac5c94b800a?auto=format&fit=crop&w=1400&q=82",
-    "https://images.unsplash.com/photo-1492684223066-81342ee5ff30?auto=format&fit=crop&w=1400&q=82",
-    "https://images.unsplash.com/photo-1506157786151-b8491531f063?auto=format&fit=crop&w=1400&q=82",
-    "https://images.unsplash.com/photo-1540039155733-5bb30b53aa14?auto=format&fit=crop&w=1400&q=82",
-    "https://images.unsplash.com/photo-1521337581100-8ca9a73a5f79?auto=format&fit=crop&w=1400&q=82",
-  ],
-  Festivals: [
-    "https://images.unsplash.com/photo-1459749411175-04bf5292ceea?auto=format&fit=crop&w=1400&q=82",
-    "https://images.unsplash.com/photo-1505236858219-8359eb29e329?auto=format&fit=crop&w=1400&q=82",
-    "https://images.unsplash.com/photo-1500530855697-b586d89ba3ee?auto=format&fit=crop&w=1400&q=82",
-  ],
-  Theatre: [
-    "https://images.unsplash.com/photo-1503095396549-807759245b35?auto=format&fit=crop&w=1400&q=82",
-    "https://images.unsplash.com/photo-1485846234645-a62644f84728?auto=format&fit=crop&w=1400&q=82",
-    "https://images.unsplash.com/photo-1507924538820-ede94a04019d?auto=format&fit=crop&w=1400&q=82",
-  ],
-  Sports: [
-    "https://images.unsplash.com/photo-1461896836934-ffe607ba8211?auto=format&fit=crop&w=1400&q=82",
-    "https://images.unsplash.com/photo-1530549387789-4c1017266635?auto=format&fit=crop&w=1400&q=82",
-    "https://images.unsplash.com/photo-1546519638-68e109498ffc?auto=format&fit=crop&w=1400&q=82",
-  ],
-  Culture: [
-    "https://images.unsplash.com/photo-1482160549825-59d1b23cb208?auto=format&fit=crop&w=1400&q=82",
-    "https://images.unsplash.com/photo-1545987796-200677ee1011?auto=format&fit=crop&w=1400&q=82",
-    "https://images.unsplash.com/photo-1513364776144-60967b0f800f?auto=format&fit=crop&w=1400&q=82",
-  ],
-  Nightlife: [
-    "https://images.unsplash.com/photo-1524368535928-5b5e00ddc76b?auto=format&fit=crop&w=1400&q=82",
-    "https://images.unsplash.com/photo-1566417713940-fe7c737a9ef2?auto=format&fit=crop&w=1400&q=82",
-    "https://images.unsplash.com/photo-1514525253161-7a46d19cd819?auto=format&fit=crop&w=1400&q=82",
-    "https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?auto=format&fit=crop&w=1400&q=82",
-  ],
-  Business: [
-    "https://images.unsplash.com/photo-1540575467063-178a50c2df87?auto=format&fit=crop&w=1400&q=82",
-    "https://images.unsplash.com/photo-1505373877841-8d25f7d46678?auto=format&fit=crop&w=1400&q=82",
-    "https://images.unsplash.com/photo-1517245386807-bb43f82c33c4?auto=format&fit=crop&w=1400&q=82",
-  ],
-  Family: [
-    "https://images.unsplash.com/photo-1503454537195-1dcabb73ffb9?auto=format&fit=crop&w=1400&q=82",
-    "https://images.unsplash.com/photo-1607453998774-d533f65dac99?auto=format&fit=crop&w=1400&q=82",
-    "https://images.unsplash.com/photo-1596464716127-f2a82984de30?auto=format&fit=crop&w=1400&q=82",
-  ],
-};
-
-const PRICE_POINTS = [25, 29, 35, 39, 45, 49, 55, 59, 65, 69, 75, 79] as const;
-
-const CATEGORY_PRICE_FACTOR: Readonly<Record<EventCategory, number>> = {
-  Concerts: 1,
-  Festivals: 1.2,
-  Theatre: 0.9,
-  Sports: 0.8,
-  Culture: 0.75,
-  Nightlife: 0.85,
-  Business: 2.4,
-  Family: 0.65,
+const CATEGORY_IMAGES: Readonly<Record<EventCategory, string>> = {
+  Concerts: "/events/concerts.webp",
+  Festivals: "/events/festivals.webp",
+  Theatre: "/events/theatre.webp",
+  Sports: "/events/sports.webp",
+  Culture: "/events/culture.webp",
+  Nightlife: "/events/nightlife.webp",
+  Business: "/events/business.webp",
+  Family: "/events/family.webp",
 };
 
 const CITY_ALIASES: Readonly<Record<string, string>> = {
@@ -168,6 +132,67 @@ const TICKET_TYPE_IDS = new Set<TicketTypeId>([
   "standard",
   "premium",
 ]);
+const FEATURED_SOURCE_IDS = new Set([
+  8525, 7576, 7882, 8202, 8493, 8401, 7934, 8171, 8187, 8213, 8347, 8172,
+]);
+
+const CURATED_CATEGORY_OVERRIDES: Readonly<
+  Partial<Record<number, EventCategory>>
+> = {
+  7867: "Festivals",
+  7987: "Nightlife",
+  8265: "Concerts",
+  8300: "Culture",
+  8326: "Concerts",
+  8353: "Festivals",
+  8357: "Concerts",
+  8364: "Concerts",
+  8376: "Festivals",
+  8397: "Nightlife",
+  8396: "Concerts",
+  8401: "Concerts",
+  8404: "Concerts",
+  8480: "Nightlife",
+  8499: "Nightlife",
+  8502: "Concerts",
+  8510: "Nightlife",
+  8526: "Concerts",
+};
+
+// Historic tickets only stored the tier ID. These neutral labels keep old
+// account/ticket pages readable without advertising made-up live inventory.
+const ARCHIVED_TICKET_TYPES: Readonly<Record<TicketTypeId, TicketType>> = {
+  fan: {
+    id: "fan",
+    label: "Fan",
+    price: 0,
+    priceLabel: "",
+    currency: EUR_CURRENCY,
+    capacity: 0,
+    accent: "#14b8a6",
+    description: "Архивирана билетна категория.",
+  },
+  standard: {
+    id: "standard",
+    label: "Standard",
+    price: 0,
+    priceLabel: "",
+    currency: EUR_CURRENCY,
+    capacity: 0,
+    accent: "#f97316",
+    description: "Архивирана билетна категория.",
+  },
+  premium: {
+    id: "premium",
+    label: "Premium",
+    price: 0,
+    priceLabel: "",
+    currency: EUR_CURRENCY,
+    capacity: 0,
+    accent: "#7c3aed",
+    description: "Архивирана билетна категория.",
+  },
+};
 
 export function formatEventDate(startsAt: string | Date): string {
   return DATE_FORMATTER.format(
@@ -195,8 +220,39 @@ export function formatPrice(
       }).format(amount);
 }
 
-export function convertLegacyBgnToEur(amountInBgn: number): number {
-  return Math.round((amountInBgn / BGN_PER_EUR) * 100) / 100;
+export function isDualPriceDisplayPeriod(now = new Date()): boolean {
+  const timestamp = now.getTime();
+  return (
+    Number.isFinite(timestamp) &&
+    timestamp >= DUAL_PRICE_DISPLAY_START &&
+    timestamp < DUAL_PRICE_DISPLAY_END
+  );
+}
+
+export function formatDualCurrencyPrice(
+  amountInEur: number,
+  locale: "bg" | "en" = "bg",
+  now = new Date(),
+): string {
+  const numberLocale = locale === "en" ? "en-GB" : "bg-BG";
+  const euro = new Intl.NumberFormat(numberLocale, {
+    style: "currency",
+    currency: "EUR",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(amountInEur);
+
+  if (!isDualPriceDisplayPeriod(now)) {
+    return euro;
+  }
+
+  const lev = new Intl.NumberFormat(numberLocale, {
+    style: "currency",
+    currency: "BGN",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(Math.round(amountInEur * BGN_PER_EUR * 100) / 100);
+  return `${euro} / ${lev}`;
 }
 
 function includesAny(value: string, terms: readonly string[]): boolean {
@@ -205,6 +261,10 @@ function includesAny(value: string, terms: readonly string[]): boolean {
 
 function inferCategory(seed: EventSeed): EventCategory {
   const title = seed.name.toLocaleLowerCase("bg-BG");
+  const curated = CURATED_CATEGORY_OVERRIDES[seed.sourceId];
+  if (curated) {
+    return curated;
+  }
 
   if (
     includesAny(title, [
@@ -254,20 +314,6 @@ function inferCategory(seed: EventSeed): EventCategory {
 
   if (
     includesAny(title, [
-      "театър",
-      "theatre",
-      "стендъп",
-      "stand-up",
-      "комедия",
-      "спектакъл",
-      "секс и драма",
-    ])
-  ) {
-    return "Theatre";
-  }
-
-  if (
-    includesAny(title, [
       "festival",
       "fest ",
       "fest 20",
@@ -282,7 +328,51 @@ function inferCategory(seed: EventSeed): EventCategory {
 
   if (
     includesAny(title, [
+      "live",
+      "концерт",
+      "tour",
+      "trio",
+      "orchestra",
+      "symphonie",
+      "музикални",
+      "музика",
+      "молец",
+      "керана",
+      "nightmares on wax",
+      "urgehal",
+      "slomosa",
+      "soyuz",
+      "jamie woon",
+      "kard",
+      "autechre",
+      "pigs pigs pigs",
+      "metallica",
+      "inner circle",
+      "moodymann",
+      "rap dynasty",
+    ])
+  ) {
+    return "Concerts";
+  }
+
+  if (
+    includesAny(title, [
+      "театър",
+      "theatre",
+      "стендъп",
+      "stand-up",
+      "комедия",
+      "спектакъл",
+      "секс и драма",
+    ])
+  ) {
+    return "Theatre";
+  }
+
+  if (
+    includesAny(title, [
       "party",
+      "парти",
       "rooftop",
       "boat",
       "dirty",
@@ -298,23 +388,6 @@ function inferCategory(seed: EventSeed): EventCategory {
     return "Nightlife";
   }
 
-  if (
-    includesAny(title, [
-      "live",
-      "концерт",
-      "tour",
-      "trio",
-      "orchestra",
-      "symphonie",
-      "музикални",
-      "музика",
-      "молец",
-      "керана",
-    ])
-  ) {
-    return "Concerts";
-  }
-
   return "Culture";
 }
 
@@ -327,70 +400,8 @@ function normalizeCity(city: string): string {
   return CITY_ALIASES[trimmed] ?? (trimmed || "България");
 }
 
-function getLegacyBgnPriceFrom(
-  seed: EventSeed,
-  category: EventCategory,
-): number {
-  const base = PRICE_POINTS[seed.sourceId % PRICE_POINTS.length];
-  return Math.round(base * CATEGORY_PRICE_FACTOR[category]);
-}
-
-function buildTicketTypes(
-  seedValue: number,
-  legacyPriceFrom: number,
-): readonly TicketType[] {
-  const legacyStandardPrice = Math.max(
-    legacyPriceFrom + 10,
-    Math.round(legacyPriceFrom * 1.3),
-  );
-  const legacyPremiumPrice = Math.max(
-    legacyStandardPrice + 20,
-    Math.round(legacyPriceFrom * 1.9),
-  );
-  const priceFrom = convertLegacyBgnToEur(legacyPriceFrom);
-  const standardPrice = convertLegacyBgnToEur(legacyStandardPrice);
-  const premiumPrice = convertLegacyBgnToEur(legacyPremiumPrice);
-
-  return [
-    {
-      id: "fan",
-      label: "Ранен достъп",
-      price: priceFrom,
-      priceLabel: formatPrice(priceFrom),
-      currency: EUR_CURRENCY,
-      capacity: 80 + (seedValue % 160),
-      accent: "#14b8a6",
-      description: "Достъп до събитието и мобилен билет с QR код.",
-    },
-    {
-      id: "standard",
-      label: "Стандартен",
-      price: standardPrice,
-      priceLabel: formatPrice(standardPrice),
-      currency: EUR_CURRENCY,
-      capacity: 160 + ((seedValue * 7) % 340),
-      accent: "#f97316",
-      description: "Стандартен достъп с гарантирано място в избраната зона.",
-    },
-    {
-      id: "premium",
-      label: "Премиум",
-      price: premiumPrice,
-      priceLabel: formatPrice(premiumPrice),
-      currency: EUR_CURRENCY,
-      capacity: 30 + (seedValue % 70),
-      accent: "#7c3aed",
-      description: "Премиум зона, отделен вход и приоритетно обслужване.",
-    },
-  ];
-}
-
-export function getCategoryImage(
-  category: EventCategory,
-  seedValue = 0,
-): string {
-  const images = IMAGE_POOL[category];
-  return images[seedValue % images.length];
+export function getCategoryImage(category: EventCategory): string {
+  return CATEGORY_IMAGES[category];
 }
 
 function normalizeSeed(seed: EventSeed): CatalogEvent {
@@ -401,9 +412,7 @@ function normalizeSeed(seed: EventSeed): CatalogEvent {
       ? "Локацията предстои"
       : seed.venue.trim();
   const startsAt = normalizeStartsAt(seed.startsAt);
-  const legacyPriceFrom = getLegacyBgnPriceFrom(seed, category);
-  const priceFrom = convertLegacyBgnToEur(legacyPriceFrom);
-  const image = getCategoryImage(category, seed.sourceId);
+  const image = `/events/listings/bilet-${seed.sourceId}.webp`;
 
   return {
     id: `bilet-${seed.sourceId}`,
@@ -411,7 +420,7 @@ function normalizeSeed(seed: EventSeed): CatalogEvent {
     title: seed.name,
     name: seed.name,
     tagline: `${CATEGORY_LABELS[category]} в ${city} • ${venue}`,
-    description: `${seed.name} гостува в ${venue}, ${city}. Изберете билетна категория и получете билета си директно по имейл.`,
+    description: `${seed.name} гостува в ${venue}, ${city}. Вижте актуалната програма, цени и условия в посочения източник на събитието.`,
     category,
     city,
     venue,
@@ -419,54 +428,26 @@ function normalizeSeed(seed: EventSeed): CatalogEvent {
     startsAt,
     date: formatEventDate(startsAt),
     time: formatEventTime(startsAt),
-    priceFrom,
-    priceLabel: `от ${formatPrice(priceFrom)}`,
+    priceFrom: 0,
+    priceLabel: "Източник",
+    priceAvailable: false,
     currency: EUR_CURRENCY,
     image,
     heroImage: image,
-    ticketTypes: buildTicketTypes(seed.sourceId, legacyPriceFrom),
+    ticketTypes: [],
     sourceName: "Bilet.bg",
     sourceUrl: `https://www.bilet.bg/bg/events/${seed.slug}`,
-    saleMode: "internal",
+    saleMode: "external",
+    sourceOfficial: false,
+    featured: FEATURED_SOURCE_IDS.has(seed.sourceId),
+    bangerScore: FEATURED_SOURCE_IDS.has(seed.sourceId)
+      ? 82 + (seed.sourceId % 17)
+      : 35 + (seed.sourceId % 41),
   };
 }
 
-const FEATURED_TICKET_TYPES: readonly TicketType[] = [
-  {
-    id: "fan",
-    label: "Fan Zone",
-    price: convertLegacyBgnToEur(91),
-    priceLabel: formatPrice(convertLegacyBgnToEur(91)),
-    currency: EUR_CURRENCY,
-    capacity: 160,
-    accent: "#14b8a6",
-    description: "Правостояща зона с бърз вход и PDF билет.",
-  },
-  {
-    id: "standard",
-    label: "Standard Seat",
-    price: convertLegacyBgnToEur(128),
-    priceLabel: formatPrice(convertLegacyBgnToEur(128)),
-    currency: EUR_CURRENCY,
-    capacity: 90,
-    accent: "#f97316",
-    description: "Седящо място в централните сектори.",
-  },
-  {
-    id: "premium",
-    label: "Premium",
-    price: convertLegacyBgnToEur(189),
-    priceLabel: formatPrice(convertLegacyBgnToEur(189)),
-    currency: EUR_CURRENCY,
-    capacity: 30,
-    accent: "#7c3aed",
-    description: "Най-добра видимост, отделен вход и приоритетно обслужване.",
-  },
-];
-
 const FEATURED_STARTS_AT = "2026-09-29T20:00:00+03:00";
-const FEATURED_IMAGE =
-  "https://images.unsplash.com/photo-1501386761578-eac5c94b800a?auto=format&fit=crop&w=1800&q=85";
+const FEATURED_IMAGE = "/events/deep-purple.webp";
 
 export const EVENT: CatalogEvent = {
   id: "deep-purple-live-sofia-2026",
@@ -483,16 +464,19 @@ export const EVENT: CatalogEvent = {
   startsAt: FEATURED_STARTS_AT,
   date: formatEventDate(FEATURED_STARTS_AT),
   time: formatEventTime(FEATURED_STARTS_AT),
-  priceFrom: convertLegacyBgnToEur(91),
-  priceLabel: `от ${formatPrice(convertLegacyBgnToEur(91))}`,
+  priceFrom: 0,
+  priceLabel: "Източник",
+  priceAvailable: false,
   currency: EUR_CURRENCY,
   image: FEATURED_IMAGE,
   heroImage: FEATURED_IMAGE,
-  ticketTypes: FEATURED_TICKET_TYPES,
+  ticketTypes: [],
   sourceName: "Eventim",
   sourceUrl: "https://www.eventim.bg/en/artist/deep-purple/",
-  saleMode: "internal",
+  saleMode: "external",
+  sourceOfficial: true,
   featured: true,
+  bangerScore: 100,
 };
 
 export const CATALOG_EVENTS: readonly CatalogEvent[] = [
@@ -505,11 +489,6 @@ const EVENTS_BY_SLUG = new Map(
   CATALOG_EVENTS.map((event) => [event.slug, event]),
 );
 
-export const TOTAL_CAPACITY = EVENT.ticketTypes.reduce(
-  (sum, type) => sum + type.capacity,
-  0,
-);
-
 export function getEventById(id: string): CatalogEvent | undefined {
   return EVENTS_BY_ID.get(id);
 }
@@ -520,6 +499,25 @@ export function getEventBySlug(slug: string): CatalogEvent | undefined {
 
 export function isTicketTypeId(value: unknown): value is TicketTypeId {
   return typeof value === "string" && TICKET_TYPE_IDS.has(value as TicketTypeId);
+}
+
+export function isEventUpcoming(
+  event: Pick<CatalogEvent, "startsAt">,
+  now = new Date(),
+): boolean {
+  const startsAt = Date.parse(event.startsAt);
+  return Number.isFinite(startsAt) && startsAt > now.getTime();
+}
+
+export function isEventOpenForInternalSale(
+  event: CatalogEvent,
+  now = new Date(),
+): boolean {
+  return (
+    event.saleMode === "internal" &&
+    isEventUpcoming(event, now) &&
+    event.ticketTypes.length > 0
+  );
 }
 
 export function getTicketType(id: TicketTypeId): TicketType;
@@ -539,7 +537,7 @@ export function getTicketType(
 
   return (
     event?.ticketTypes.find((type) => type.id === typeId) ??
-    EVENT.ticketTypes.find((type) => type.id === typeId) ??
-    EVENT.ticketTypes[0]
+    ARCHIVED_TICKET_TYPES[typeId] ??
+    ARCHIVED_TICKET_TYPES.standard
   );
 }

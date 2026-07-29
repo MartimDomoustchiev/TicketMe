@@ -1,6 +1,7 @@
 import {
   CATEGORY_LABELS,
   EVENT,
+  formatDualCurrencyPrice,
   type CatalogEvent,
   type EventCategory,
 } from "@/lib/event";
@@ -11,6 +12,36 @@ import {
 } from "@/lib/i18n-config";
 
 const SOFIA_TIME_ZONE = "Europe/Sofia";
+const MONTH_LABELS: Readonly<Record<Locale, readonly string[]>> = {
+  bg: [
+    "ЯНУ",
+    "ФЕВ",
+    "МАР",
+    "АПР",
+    "МАЙ",
+    "ЮНИ",
+    "ЮЛИ",
+    "АВГ",
+    "СЕП",
+    "ОКТ",
+    "НОЕ",
+    "ДЕК",
+  ],
+  en: [
+    "JAN",
+    "FEB",
+    "MAR",
+    "APR",
+    "MAY",
+    "JUN",
+    "JUL",
+    "AUG",
+    "SEP",
+    "OCT",
+    "NOV",
+    "DEC",
+  ],
+};
 
 const ENGLISH_CATEGORY_LABELS: Readonly<Record<EventCategory, string>> = {
   Concerts: "Concerts",
@@ -122,28 +153,79 @@ export function formatEventMonth(
   locale: Locale = DEFAULT_LOCALE,
 ): string {
   const date = new Date(event.startsAt);
-  return Number.isNaN(date.getTime())
-    ? ""
-    : dateFormatter(locale, { month: "short" })
-        .format(date)
-        .replace(".", "")
-        .toLocaleUpperCase(locale === "en" ? "en-GB" : "bg-BG");
+  if (Number.isNaN(date.getTime())) {
+    return "";
+  }
+
+  const monthIndex = Number(
+    new Intl.DateTimeFormat("en-CA", {
+      month: "numeric",
+      timeZone: SOFIA_TIME_ZONE,
+    }).format(date),
+  ) - 1;
+  return MONTH_LABELS[locale][monthIndex] ?? "";
+}
+
+export function formatVenueLocation(
+  event: Pick<CatalogEvent, "venue" | "city">,
+  locale: Locale = DEFAULT_LOCALE,
+): string {
+  const city = localizeCity(event.city, locale);
+  const normalize = (value: string) =>
+    value
+      .normalize("NFKC")
+      .toLocaleLowerCase(locale === "en" ? "en-GB" : "bg-BG")
+      .replace(/[.,]/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+  const venue = normalize(event.venue);
+  const localizedCity = normalize(city);
+  const originalCity = normalize(event.city);
+  const englishCity = normalize(localizeCity(event.city, "en"));
+
+  if (
+    venue === localizedCity ||
+    venue === originalCity ||
+    venue === englishCity ||
+    venue.endsWith(` ${localizedCity}`) ||
+    venue.endsWith(` ${originalCity}`) ||
+    venue.endsWith(` ${englishCity}`)
+  ) {
+    return event.venue;
+  }
+
+  return `${event.venue}, ${city}`;
+}
+
+export function externalSourceLabel(
+  event: Pick<CatalogEvent, "sourceOfficial">,
+  locale: Locale = DEFAULT_LOCALE,
+): string {
+  if (event.sourceOfficial) {
+    return locale === "en"
+      ? "Official event source"
+      : "Официален източник";
+  }
+  return locale === "en" ? "Event source" : "Източник на събитието";
 }
 
 export function formatPrice(
   event: CatalogEvent,
   locale: Locale = DEFAULT_LOCALE,
+  now = new Date(),
 ): string {
-  if (event.saleMode === "external") {
-    return locale === "en" ? "Event source" : "Източник";
+  if (event.saleMode === "external" && event.priceAvailable !== true) {
+    return externalSourceLabel(event, locale);
   }
 
-  return new Intl.NumberFormat(locale === "en" ? "en-GB" : "bg-BG", {
-    style: "currency",
-    currency: event.currency,
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 2,
-  }).format(event.priceFrom);
+  return event.currency === "EUR"
+    ? formatDualCurrencyPrice(event.priceFrom, locale, now)
+    : new Intl.NumberFormat(locale === "en" ? "en-GB" : "bg-BG", {
+        style: "currency",
+        currency: event.currency,
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      }).format(event.priceFrom);
 }
 
 export function localizedEventTagline(
@@ -166,7 +248,10 @@ export function localizedEventDescription(
     return "Deep Purple arrive at Arena 8888 Sofia for a full-scale live show featuring the songs that defined generations of rock music.";
   }
   if (event.saleMode === "external") {
-    return `${event.title} takes place at ${event.venue}, ${localizeCity(event.city, locale)}. Dates and admission details are verified against the linked organizer source.`;
+    const source = event.sourceOfficial
+      ? "official event source"
+      : "linked event source";
+    return `${event.title} takes place at ${formatVenueLocation(event, locale)}. Check the ${source} for current programme, admission and access details.`;
   }
   return `${event.title} comes to ${event.venue}, ${localizeCity(event.city, locale)}. Choose your ticket category and receive your e-ticket directly by email.`;
 }

@@ -1,34 +1,37 @@
-# TicketForge
+# TicketMe
 
-TicketForge е multi-event платформа за откриване и заявяване на билети,
-разработена като кандидатска задача за ИТ екипа на Hack TUES 13 и TUES Fest
-2027. Интерфейсът е локализиран на български и английски и е оптимизиран за
-desktop и mobile.
+TicketMe е multi-event платформа за откриване и заявяване на билети с
+production-oriented архитектура. Интерфейсът е локализиран на български и
+английски и е оптимизиран за desktop и mobile.
 
-Началният каталог съдържа **126 събития**: 125 публични upcoming listings от
-Bilet.bg и едно featured събитие от Eventim. Към него могат да се добавят
-публикувани записи от постоянния discovery каталог в PostgreSQL. Всеки запис
-има собствена страница; външно откритите събития водят към оригиналния
-източник и никога не получават измислен TicketForge inventory или цена.
+Началният snapshot съдържа **126 source listings**: 125 публични записа от
+Bilet.bg и едно featured събитие от Eventim. Изтеклите записи автоматично
+отпадат от публичния каталог. Към него могат да се добавят публикувани записи
+от постоянния discovery каталог в PostgreSQL. Всеки активен запис има
+собствена страница; външно откритите събития водят към оригиналния източник и
+никога не получават измислен TicketMe inventory или цена.
 
 Snapshot-ът е нормализиран от публичния календар на
 [Bilet.bg](https://www.bilet.bg/bg) и публичната страница на
 [Deep Purple в Eventim](https://www.eventim.bg/en/artist/deep-purple/).
 
 > [!IMPORTANT]
-> Това е портфолио проект, а не официален продавач за показаните събития.
-> Кандидатският deployment трябва да използва само Stripe sandbox/test keys и
-> Stripe test cards за ръчно въведени плащания. Не включвай live mode за
-> демонстрацията. Данните за събитията са snapshot и могат да се променят при
-> оригиналните организатори.
+> Публичните listings са discovery записи, а не TicketMe inventory. Live
+> checkout се активира само за събития с изрично организаторско право,
+> договорена наличност, завършено Stripe onboarding и production webhook.
+> Използвай test keys и Stripe test cards единствено в local/staging среда.
 
 ## Какво е реализирано
 
 - Начална marketplace страница и каталог с търсене, категории, град,
   сортиране и pagination.
+- 126 отделни rights-safe cover assets с category-matched photography и
+  deterministic event-specific crop/color direction; official artwork не се
+  hotlink-ва без изрични права.
 - Пълни `/bg` и `/en` публични routes с language switcher, локализирани
   metadata, checkout, email и PDF съдържание.
-- 126 отделни event detail страници с metadata и structured event data.
+- Отделни detail страници за всички активни listings, с metadata и structured
+  event data; изтеклите директни URL-и връщат not-found.
 - Единна email/password login страница за клиенти и администратори.
 - Професионална регистрация с password strength, email verification и
   отделни роли в базата.
@@ -36,8 +39,10 @@ Snapshot-ът е нормализиран от публичния календа
 - 30-минутна inventory reservation с автоматично освобождаване при изтекъл
   Checkout Session.
 - Idempotent Stripe webhook fulfillment и success-page recovery path.
-- Три билетни категории с отделен капацитет и цена за всяко събитие.
-- PDF билет с купувач, събитие, категория, admission label и QR код.
+- Ticket-category модел с отделен капацитет и цена за organizer-owned
+  събития; source-only listings нямат локален inventory.
+- Уникален PDF дизайн според събитието и билета, с купувач, категория,
+  admission label и QR код с безопасна quiet zone.
 - Private cloud storage за PDF файловете и защитено изтегляне през сайта.
 - PDF attachment и download линк в transactional email след заявката.
 - Наличности в реално време чрез Server-Sent Events (SSE), без refresh.
@@ -71,7 +76,7 @@ Snapshot-ът е нормализиран от публичния календа
 | Натоварване | Кратката DB транзакция пази наличността; Stripe, PDF, storage и email I/O са извън allocation critical section. |
 | Добра архитектура | UI, route handlers, domain services и provider adapters са разделени по отговорности. |
 | Сигурност | Scrypt password hashes, opaque server-side sessions, authorization, rate limiting, parameterized SQL и security headers. |
-| Deploy | Next.js приложението е подготвено за long-running Node host с managed PostgreSQL, Resend и R2/S3. |
+| Deploy | Next.js приложението се deploy-ва във Vercel; PostgreSQL, Resend, Stripe и private S3/R2 остават зад readiness gates. |
 | Актуален каталог | Daily/monthly scheduler чете само разрешени feeds, deduplicate-ва записите и ги подава към admin review или доверено auto-publish. |
 
 Бонусите с реална Stripe Checkout интеграция, билетни категории, multi-event
@@ -134,7 +139,7 @@ Domain services
   английски страници.
 
 Заявка към `/` или друг публичен URL без prefix се пренасочва според
-`ticketforge_locale` cookie, след това според `Accept-Language`, с fallback към
+`ticketme_locale` cookie, след това според `Accept-Language`, с fallback към
 `bg`. Това е `307` redirect, а locale cookie-то се пази една година.
 Switcher-ът в header-а сменя locale-а, като запазва текущите path и query.
 API routes и static/metadata assets остават без prefix. Sitemap-ът публикува и
@@ -279,7 +284,7 @@ EVENT_DISCOVERY_ALLOWED_HOSTS='[
 EVENT_DISCOVERY_MAX_EVENTS="40"
 EVENT_DISCOVERY_LOOKAHEAD_DAYS="180"
 EVENT_DISCOVERY_AUTO_PUBLISH="false"
-EVENT_DISCOVERY_CRON_SECRET="generate-at-least-32-random-characters"
+CRON_SECRET="generate-at-least-32-random-characters"
 GEMINI_API_KEY=""
 ```
 
@@ -308,22 +313,24 @@ GEMINI_API_KEY=""
    `EVENT_DISCOVERY_AUTO_PUBLISH=true` го публикува автоматично.
 6. Публичният каталог, event страниците и sitemap-ът включват само
    `published` бъдещи записи. External listings никога не минават през
-   TicketForge inventory или Stripe и водят към оригиналния source URL.
+   TicketMe inventory или Stripe и водят към оригиналния source URL.
 
-Ръчно organizer изпълнение се стартира от admin страницата. За scheduler
-извикай веднъж дневно защитения endpoint от Railway Cron, GitHub Actions,
-AWS EventBridge+Lambda или друг trusted scheduler:
+Ръчно organizer изпълнение се стартира от admin страницата. `vercel.json`
+извиква endpoint-а веднъж дневно чрез Vercel Cron, а Vercel подава
+`Authorization: Bearer <CRON_SECRET>` автоматично. За друг trusted scheduler:
 
 ```bash
 curl --fail-with-body --request POST \
-  --header "Authorization: Bearer $EVENT_DISCOVERY_CRON_SECRET" \
+  --header "Authorization: Bearer $CRON_SECRET" \
   https://your-domain.example/api/cron/events/discover
 ```
 
-Endpoint-ът приема само `POST`, изисква минимум 32-знаков secret, сравнява го
-constant-time и използва PostgreSQL advisory lock, така че две едновременни
-изпълнения не могат да се застъпят. Всеки run записва status, model, window и
-created/updated/rejected counters в `event_discovery_runs`.
+Endpoint-ът приема `GET` за Vercel Cron и `POST` за външни scheduler-и,
+изисква минимум 32-знаков secret, сравнява го constant-time и използва
+PostgreSQL advisory lock, така че две едновременни изпълнения не могат да се
+застъпят. `EVENT_DISCOVERY_CRON_SECRET` се поддържа само като legacy fallback.
+Всеки run записва status, model, window и created/updated/rejected counters в
+`event_discovery_runs`.
 
 Migration `004_event_discovery.sql` добавя `catalog_events`,
 `catalog_event_sources` и `event_discovery_runs`. Изпълни я чрез общия runner:
@@ -360,7 +367,7 @@ browser-ът, устройството, държавата и настроени
 35-минутната резервация. Wallet плащанията минават през същото server-side
 amount, currency, metadata и fulfillment валидиране като обикновена карта.
 Всяка Checkout Session override-ва тестовото account име с публичния бранд
-`TicketForge` и използва същите цветове и типография като marketplace UI.
+`TicketMe` и използва същите цветове и типография като marketplace UI.
 Stripe запазва видима `Sandbox` индикация при test-mode сесии; тя изчезва
 единствено при реална live-mode Checkout Session.
 
@@ -369,7 +376,7 @@ Stripe запазва видима `Sandbox` индикация при test-mode
 `STRIPE_WEBHOOK_SECRET`. Не добавяй `NEXT_PUBLIC_STRIPE_*` променлива, не
 записвай ключове в кода и никога не ги commit-вай.
 
-За кандидатската демонстрация използвай единствено Stripe sandbox/test mode.
+За local и staging проверки използвай единствено Stripe sandbox/test mode.
 Никога не въвеждай ръчно реални картови данни в Checkout; за картовата форма
 използвай Stripe test cards. Показването на Apple Pay или Google Pay може да
 изисква вече настроена карта в съответния wallet, но `sk_test_...` запазва
@@ -385,7 +392,7 @@ fulfillment проверките и PDF билетите използват ед
 | Опция | Предимства | Компромис |
 | --- | --- | --- |
 | **Resend — избрана** | Малък TypeScript API, лесна domain verification, добра работа с HTML и PDF attachments. | Изисква верифициран sending domain и следене на provider limits. |
-| Amazon SES | Много добър избор при голям обем и AWS инфраструктура. | Повече IAM, sandbox, DNS и operational настройка за кандидатски проект. |
+| Amazon SES | Много добър избор при голям обем и AWS инфраструктура. | Повече IAM, sandbox, DNS и operational настройка за този scope. |
 | Postmark | Силен transactional фокус и добри delivery инструменти. | Отделен provider и ценови модел без съществено предимство за този scope. |
 
 Resend дава най-краткия и ясен production path за verification и ticket
@@ -426,10 +433,10 @@ configuration. Hosted Checkout не изисква wallet SDK в приложе�
 държавата и настроеният Apple Wallet или Google Wallet са допустими; при
 останалите устройства Stripe показва картовата форма.
 
-За кандидатското sandbox demo Stripe Link е изключен, за да не конкурира
+В test-mode средата Stripe Link е изключен, за да не конкурира
 Apple Pay/Google Pay и да не показва legacy sandbox account името в текста за
 запазване на платежни данни. Преди повторно включване на Link промени
-customer-facing Business name на `TicketForge` от Stripe Dashboard →
+customer-facing Business name на `TicketMe` от Stripe Dashboard →
 Settings → Business details.
 
 `STRIPE_WEBHOOK_SECRET` не е задължителен за този локален happy path. За
@@ -471,7 +478,7 @@ development. Приложението ще използва:
 ### Resend за произволни получатели
 
 `onboarding@resend.dev` е само тестов sender и може да изпраща единствено до
-email адреса на собственика на Resend акаунта. Кодът на TicketForge не
+email адреса на собственика на Resend акаунта. Кодът на TicketMe не
 ограничава получателите, но реална доставка до Gmail, Outlook, Yahoo или
 корпоративен адрес изисква собствен потвърден sending domain:
 
@@ -483,7 +490,7 @@ email адреса на собственика на Resend акаунта. Ко�
 4. Промени server-only конфигурацията и рестартирай приложението:
 
    ```dotenv
-   MAIL_FROM="TicketForge <tickets@mail.your-domain.com>"
+   MAIL_FROM="TicketMe <tickets@mail.your-domain.com>"
    ```
 
 След това същият signup и ticket-delivery код изпраща до всеки валиден
@@ -541,7 +548,7 @@ PostgreSQL през `DATABASE_URL`, когато той е конфигурир�
 | `DATABASE_POOL_MAX` | не | Shared pool limit; default `5`, максимум `20`. |
 | `MIGRATION_DATABASE_URL` | не | Отделен admin/migration connection URL; fallback към normal DB config. |
 | `DATABASE_AUTO_MIGRATE` | production: винаги `false` | Development-only runtime DDL escape hatch. |
-| `STRIPE_SECRET_KEY` | задължителна | Server-only Stripe secret key; за кандидатското demo използвай test-mode key. |
+| `STRIPE_SECRET_KEY` | задължителна | Server-only Stripe secret key; за local/staging използвай test-mode key. |
 | `STRIPE_WEBHOOK_SECRET` | production: задължителна; local happy path: не | Отделен server-only signing secret за надеждно асинхронно fulfillment. |
 | `RESEND_API_KEY` | задължителна | Resend API credential. |
 | `MAIL_FROM` | задължителна | Sender от верифициран домейн. |
@@ -552,7 +559,8 @@ PostgreSQL през `DATABASE_URL`, когато той е конфигурир�
 | `S3_SECRET_ACCESS_KEY` | задължителна | Object storage secret key. |
 | `EVENT_DISCOVERY_FEED_URLS` | за discovery: задължителна | JSON array или newline-separated списък с разрешени HTTPS RSS/Atom/ICS/JSON feeds. |
 | `EVENT_DISCOVERY_ALLOWED_HOSTS` | не | Exact/wildcard host allowlist за source links извън feed hostname-а. |
-| `EVENT_DISCOVERY_CRON_SECRET` | за scheduler: задължителна | Минимум 32 random символа за Bearer authentication. |
+| `CRON_SECRET` | за scheduler: задължителна | Стандартният Vercel Cron Bearer secret; минимум 32 random символа. |
+| `EVENT_DISCOVERY_CRON_SECRET` | legacy fallback | Използва се само когато `CRON_SECRET` липсва. |
 | `EVENT_DISCOVERY_AUTO_PUBLISH` | не | Default `false`; `true` само след review на правата и качеството на всеки feed. |
 | `EVENT_DISCOVERY_MAX_EVENTS` | не | Максимални кандидати на run; default `40`, hard cap `500`. |
 | `EVENT_DISCOVERY_LOOKAHEAD_DAYS` | не | Бъдещ discovery window; default `180`, hard cap `730`. |
@@ -606,7 +614,7 @@ PostgreSQL през `DATABASE_URL`, когато той е конфигурир�
 | `GET /api/admin/tickets` | Sanitized ticket list за admin сесия. |
 | `POST /api/admin/event-discovery` | Same-origin admin-only ръчно discovery изпълнение. |
 | `POST /api/admin/event-discovery/review` | Admin-only publish/reject на pending candidate. |
-| `POST /api/cron/events/discover` | Bearer-protected scheduler trigger с concurrency lock. |
+| `GET` или `POST /api/cron/events/discover` | Bearer-protected Vercel/external scheduler trigger с concurrency lock. |
 | `GET /api/health` | Production readiness; връща `200` или `503`. |
 
 ## Сигурност
@@ -648,11 +656,11 @@ PostgreSQL през `DATABASE_URL`, когато той е конфигурир�
 - Model output минава през strict schema/runtime validation. Gemini никога не
   получава source URLs, contacts, users, prices или inventory и никога не
   управлява директно Stripe или ticket state.
-- Cron mutation е POST-only с минимум 32-знаков Bearer secret,
-  constant-time verification и PostgreSQL advisory lock; organizer review е
-  same-origin и role protected.
+- Cron trigger-ът приема Vercel `GET` и external scheduler `POST` с минимум
+  32-знаков Bearer secret, constant-time verification и PostgreSQL advisory
+  lock; organizer review е same-origin и role protected.
 - Production health/readiness fail closed, ако липсват database, verified
-  custom-domain email, storage, Stripe test-mode или webhook настройки, ако
+  custom-domain email, storage, Stripe live-mode или webhook настройки, ако
   PostgreSQL TLS не е активен, или ако public URL-ът не е външен HTTPS origin.
 
 Вграденият rate limiter е process-local. При голям multi-instance deployment
@@ -679,7 +687,7 @@ curl -i http://localhost:3000/api/health
 `npm run check` изпълнява ESLint, automated tests и production build с
 TypeScript проверка. Production `/api/health` връща `503 degraded`, ако
 PostgreSQL/TLS не е достъпен или липсва задължителна public HTTPS URL,
-custom-domain Resend sender, S3/R2, Stripe test secret или webhook
+custom-domain Resend sender, S3/R2, Stripe live secret или webhook
 конфигурация. Health route-ът не извършва тестово плащане.
 
 За integration/load test използвай отделна staging database, Stripe test mode
@@ -706,52 +714,52 @@ PostgreSQL и object storage, browser E2E тестове за login/checkout/adm
 
 ## Production deploy
 
-Препоръчаният reference deployment е:
+Текущият target deployment е:
 
-- **Railway web service** — long-running Next.js Node process, подходящ за
-  продължителни SSE връзки;
-- **Railway PostgreSQL** — shared transactional state и durable FIFO queue;
-- **Stripe Checkout в sandbox/test mode** — hosted payment page и signed
-  webhooks;
-- **Resend** — verification и ticket email;
-- **Cloudflare R2** — private PDF storage.
+- **Vercel** — Next.js приложението, custom domain и daily Cron trigger;
+- **AWS RDS PostgreSQL** — users, sessions, inventory и durable FIFO queue;
+- **Stripe Checkout live mode** — само след merchant onboarding, organizer
+  authorization и signed production webhook;
+- **Resend** — verification и ticket email от верифициран TicketMe domain;
+- **AWS S3 или Cloudflare R2** — private PDF storage.
 
 Стъпки:
 
-1. Публикувай кода в public GitHub repository и го import-ни като Railway web
-   service.
-2. Добави Railway PostgreSQL service и свържи неговия `DATABASE_URL`.
+1. Свържи GitHub repository-то с Vercel и задай production branch.
+2. Осигури restricted network path от runtime-а до RDS. Не отваряй PostgreSQL
+   към `0.0.0.0/0`; използвай VPC-reachable runtime или одобрено static egress
+   решение и security-group allowlist.
 3. Изпълни migrations `001_initial.sql`, `002_stripe_checkout.sql`,
    `003_unified_auth.sql` и `004_event_discovery.sql` чрез
    `npm run db:migrate`.
 4. Верифицирай sending domain в Resend.
 5. Създай private R2 bucket и API token с object read/write права само за него.
-6. В Stripe sandbox/test environment създай webhook endpoint
+6. За staging създай test webhook, а за production — отделен live webhook
    `https://<domain>/api/stripe/webhook` за `checkout.session.completed`,
    `checkout.session.expired`, `checkout.session.async_payment_succeeded` и
    `checkout.session.async_payment_failed`.
-7. Добави test-mode `STRIPE_SECRET_KEY`, отделния endpoint
-   `STRIPE_WEBHOOK_SECRET` и останалите production variables от
-   `.env.example` в Railway. Никога не commit-вай стойностите.
+7. Добави правилния environment-specific `STRIPE_SECRET_KEY`, отделния
+   endpoint `STRIPE_WEBHOOK_SECRET` и останалите variables от `.env.example`
+   във Vercel. Никога не commit-вай стойностите.
 8. Използвай `npm run build` за build command и `npm start` за start command,
    deploy-ни и отвори `/api/health`.
 9. Регистрирай и потвърди organizer профил, после изпълни
    `npm run user:promote -- organizer@example.com` в среда със същия
    `DATABASE_URL`.
 10. Провери двата locale-а и целия acceptance flow с реален email адрес,
-   Stripe test card и public candidate domain. Не използвай реална карта.
+   Stripe test card и public staging domain. Не използвай реална карта.
 11. Ако използваш discovery, конфигурирай само feeds с право за
-    republication, генерирай отделен cron secret и добави daily scheduler към
-    `POST /api/cron/events/discover`. Остави auto-publish изключен до source
-    review.
+    republication, генерирай `CRON_SECRET` и остави конфигурирания daily
+    Vercel Cron да извиква `GET /api/cron/events/discover`. Външен scheduler
+    може да използва `POST`. Остави auto-publish изключен до source review.
 
-Render, Fly.io или друг long-running Node host са също подходящи. Vercel е
-възможна алтернатива, но преди избор трябва да се проверят актуалните execution
-duration и streaming ограничения за дългите SSE връзки и 30-секундното чакане
-в purchase queue.
+AWS App Runner/ECS, Railway, Render или Fly.io са алтернатива, когато е нужен
+директен VPC path или по-дълги SSE връзки. При смяна на runtime-а провери
+execution duration, connection pooling и streaming поведението.
 
 Локалните JSON, outbox и filesystem adapters са само за development и не могат
-да се активират неволно в production. Кандидатският deployment остава в Stripe
-test mode. Преминаване към реална търговска услуга изисква отделен security и
-legal review, refund/dispute процеси, данъчно отчитане, monitoring и
-оперативна поддръжка; това не е част от тази демонстрация.
+да се активират неволно в production. Публичният каталог може безопасно да
+работи source-only, но internal checkout остава затворен, докато конкретно
+събитие няма organizer authorization и реален inventory. Live търговията
+изисква security и legal review, refund/dispute процеси, данъчно отчитане,
+monitoring и оперативна поддръжка.

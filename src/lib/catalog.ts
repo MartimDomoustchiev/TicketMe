@@ -8,6 +8,8 @@ import {
   getCategoryImage,
   getEventById,
   getEventBySlug,
+  isEventOpenForInternalSale,
+  isEventUpcoming,
   type CatalogEvent,
   type CurrencyCode,
   type EventCategory,
@@ -77,16 +79,22 @@ export async function findCatalogEventById(
   id: string,
 ): Promise<CatalogEvent | undefined> {
   const staticEvent = getEventById(id);
-  if (staticEvent || !isDatabaseConfigured()) {
-    return staticEvent;
+  const fallback =
+    staticEvent && isEventUpcoming(staticEvent) ? staticEvent : undefined;
+  if (!isDatabaseConfigured()) {
+    return fallback;
   }
 
   try {
     const discovered = await getPublishedCatalogEventById(id);
-    return discovered ? mapDiscoveredEvent(discovered) : undefined;
+    if (discovered) {
+      const mapped = mapDiscoveredEvent(discovered);
+      return isEventUpcoming(mapped) ? mapped : fallback;
+    }
+    return fallback;
   } catch (error) {
     reportCatalogFallback(error);
-    return undefined;
+    return fallback;
   }
 }
 
@@ -94,16 +102,22 @@ export async function findCatalogEventBySlug(
   slug: string,
 ): Promise<CatalogEvent | undefined> {
   const staticEvent = getEventBySlug(slug);
-  if (staticEvent || !isDatabaseConfigured()) {
-    return staticEvent;
+  const fallback =
+    staticEvent && isEventUpcoming(staticEvent) ? staticEvent : undefined;
+  if (!isDatabaseConfigured()) {
+    return fallback;
   }
 
   try {
     const discovered = await getPublishedCatalogEventBySlug(slug);
-    return discovered ? mapDiscoveredEvent(discovered) : undefined;
+    if (discovered) {
+      const mapped = mapDiscoveredEvent(discovered);
+      return isEventUpcoming(mapped) ? mapped : fallback;
+    }
+    return fallback;
   } catch (error) {
     reportCatalogFallback(error);
-    return undefined;
+    return fallback;
   }
 }
 
@@ -118,15 +132,11 @@ export async function listRelatedCatalogEvents(
 }
 
 export function isInternallySoldEvent(event: CatalogEvent): boolean {
-  return event.saleMode !== "external";
+  return isEventOpenForInternalSale(event);
 }
 
 function upcomingStaticEvents(now = new Date()): readonly CatalogEvent[] {
-  const threshold = now.getTime() - 2 * 60 * 60 * 1_000;
-  return CATALOG_EVENTS.filter((event) => {
-    const startsAt = Date.parse(event.startsAt);
-    return Number.isFinite(startsAt) && startsAt >= threshold;
-  });
+  return CATALOG_EVENTS.filter((event) => isEventUpcoming(event, now));
 }
 
 function mapDiscoveredEvent(record: CatalogEventRecord): CatalogEvent {
@@ -135,15 +145,16 @@ function mapDiscoveredEvent(record: CatalogEventRecord): CatalogEvent {
   }
 
   const category = record.category as EventCategory;
-  const priceFrom = (record.priceFromMinor ?? 0) / 100;
-  const currency =
-    record.currency === "EUR"
-      ? (record.currency as CurrencyCode)
-      : ("EUR" as CurrencyCode);
-  const image =
-    record.imageUrl?.startsWith("https://images.unsplash.com/")
-      ? record.imageUrl
-      : getCategoryImage(category, record.bangerScore);
+  const hasSupportedPrice =
+    record.currency === "EUR" && record.priceFromMinor !== null;
+  const priceFrom = hasSupportedPrice
+    ? (record.priceFromMinor ?? 0) / 100
+    : 0;
+  const currency = "EUR" as CurrencyCode;
+  // Discovery artwork is source metadata, not automatically licensed for
+  // republication. Render TicketMe-owned category art until an organizer
+  // supplies an approved, durably stored asset with explicit usage rights.
+  const image = getCategoryImage(category);
   const sourceName =
     record.primarySource.provider
       .split("-")
@@ -166,21 +177,21 @@ function mapDiscoveredEvent(record: CatalogEventRecord): CatalogEvent {
     time: formatEventTime(record.startsAt),
     priceFrom,
     priceLabel:
-      record.priceFromMinor === null
+      !hasSupportedPrice
         ? "Източник"
         : `от ${formatPrice(priceFrom, currency)}`,
+    priceAvailable: hasSupportedPrice,
     currency,
     image,
-    heroImage:
-      record.heroImageUrl?.startsWith("https://images.unsplash.com/")
-        ? record.heroImageUrl
-        : image,
+    heroImage: image,
     ticketTypes: [],
     sourceName,
     sourceUrl: record.primarySource.sourceUrl,
     saleMode: "external",
+    sourceOfficial: record.primarySource.isOfficial,
     aiEnhanced: record.lastDiscoveredRunId !== null,
     featured: record.featured,
+    bangerScore: record.bangerScore,
   };
 }
 
@@ -188,13 +199,31 @@ function mergeCatalogues(
   staticEvents: readonly CatalogEvent[],
   discoveredEvents: readonly CatalogEvent[],
 ): readonly CatalogEvent[] {
-  const ids = new Set(staticEvents.map((event) => event.id));
-  const slugs = new Set(staticEvents.map((event) => event.slug));
+  const discoveredById = new Map(
+    discoveredEvents.map((event) => [event.id, event]),
+  );
+  const discoveredBySlug = new Map(
+    discoveredEvents.map((event) => [event.slug, event]),
+  );
+  const discoveredBySource = new Map(
+    discoveredEvents.map((event) => [event.sourceUrl, event]),
+  );
+  const consumed = new Set<string>();
+  const refreshedStatic = staticEvents.map((event) => {
+    const replacement =
+      discoveredById.get(event.id) ??
+      discoveredBySlug.get(event.slug) ??
+      discoveredBySource.get(event.sourceUrl);
+    if (replacement) {
+      consumed.add(replacement.id);
+      return replacement;
+    }
+    return event;
+  });
+
   return [
-    ...staticEvents,
-    ...discoveredEvents.filter(
-      (event) => !ids.has(event.id) && !slugs.has(event.slug),
-    ),
+    ...refreshedStatic,
+    ...discoveredEvents.filter((event) => !consumed.has(event.id)),
   ];
 }
 

@@ -15,20 +15,20 @@ export async function generateMetadata(): Promise<Metadata> {
   const english = locale === "en";
   const canonicalPath = publicUrl.split(/[?#]/)[0] || `/${locale}`;
   const title = english
-    ? "TicketForge | Tickets for events"
-    : "TicketForge | Билети за събития";
+    ? "TicketMe | Tickets for events"
+    : "TicketMe | Билети за събития";
   const description = english
-    ? "Discover concerts, festivals, theatre and experiences across Bulgaria. Secure e-tickets and live availability."
-    : "Открий концерти, фестивали, театър и преживявания в България. Сигурни електронни билети и наличност в реално време.";
+    ? "Discover upcoming concerts, festivals, theatre and experiences across Bulgaria, with clearly attributed event sources."
+    : "Открий предстоящи концерти, фестивали, театър и преживявания в България с ясно посочени източници.";
 
   return {
     metadataBase: new URL(getBaseUrl()),
     title: {
       default: title,
-      template: "%s | TicketForge",
+      template: "%s | TicketMe",
     },
     description,
-    applicationName: "TicketForge",
+    applicationName: "TicketMe",
     icons: {
       icon: "/icon.svg",
     },
@@ -58,9 +58,17 @@ export async function generateMetadata(): Promise<Metadata> {
       type: "website",
       locale: english ? "en_GB" : "bg_BG",
       alternateLocale: [english ? "bg_BG" : "en_GB"],
-      siteName: "TicketForge",
+      siteName: "TicketMe",
       title,
       description,
+      images: [
+        {
+          url: "/events/concerts.webp",
+          width: 1600,
+          height: 800,
+          alt: "TicketMe events in Bulgaria",
+        },
+      ],
     },
   };
 }

@@ -1,7 +1,11 @@
 import { randomBytes } from "crypto";
 import { getBuyerSession } from "@/lib/auth";
 import { sendTicketEmail } from "@/lib/email";
-import { getEventById, isTicketTypeId } from "@/lib/event";
+import {
+  getEventById,
+  isEventOpenForInternalSale,
+  isTicketTypeId,
+} from "@/lib/event";
 import { createTicketPdf } from "@/lib/pdf";
 import { enqueuePurchase } from "@/lib/queue";
 import { consumeRateLimit, requestIdentity } from "@/lib/rate-limit";
@@ -64,7 +68,11 @@ export async function POST(request: Request) {
   const ticketType = body?.ticketType;
   const event = getEventById(eventId);
 
-  if (!event || !isTicketTypeId(ticketType)) {
+  if (
+    !event ||
+    !isEventOpenForInternalSale(event) ||
+    !isTicketTypeId(ticketType)
+  ) {
     return Response.json(
       { error: "Събитието вече не е достъпно." },
       { status: 404 },

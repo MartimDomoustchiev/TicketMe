@@ -9,7 +9,9 @@ async function withCronSecret<T>(
   value: string | undefined,
   callback: () => Promise<T>,
 ): Promise<T> {
-  const previous = process.env.EVENT_DISCOVERY_CRON_SECRET;
+  const previousLegacy = process.env.EVENT_DISCOVERY_CRON_SECRET;
+  const previousVercel = process.env.CRON_SECRET;
+  delete process.env.CRON_SECRET;
   if (value === undefined) {
     delete process.env.EVENT_DISCOVERY_CRON_SECRET;
   } else {
@@ -19,17 +21,22 @@ async function withCronSecret<T>(
   try {
     return await callback();
   } finally {
-    if (previous === undefined) {
+    if (previousLegacy === undefined) {
       delete process.env.EVENT_DISCOVERY_CRON_SECRET;
     } else {
-      process.env.EVENT_DISCOVERY_CRON_SECRET = previous;
+      process.env.EVENT_DISCOVERY_CRON_SECRET = previousLegacy;
+    }
+    if (previousVercel === undefined) {
+      delete process.env.CRON_SECRET;
+    } else {
+      process.env.CRON_SECRET = previousVercel;
     }
   }
 }
 
-test("event discovery routes expose POST only", () => {
+test("event discovery routes support Vercel GET and trusted POST schedulers", () => {
   assert.equal("POST" in cronDiscoveryRoute, true);
-  assert.equal("GET" in cronDiscoveryRoute, false);
+  assert.equal("GET" in cronDiscoveryRoute, true);
   assert.equal("POST" in adminDiscoveryRoute, true);
   assert.equal("GET" in adminDiscoveryRoute, false);
 });
@@ -66,6 +73,40 @@ test("cron discovery rejects an invalid bearer secret", async () => {
     'Bearer realm="event-discovery"',
   );
   assert.equal(response.headers.get("cache-control"), "no-store");
+});
+
+test("cron discovery GET accepts the standard Vercel CRON_SECRET", async () => {
+  const previousVercel = process.env.CRON_SECRET;
+  const previousLegacy = process.env.EVENT_DISCOVERY_CRON_SECRET;
+  process.env.CRON_SECRET = VALID_CRON_SECRET;
+  delete process.env.EVENT_DISCOVERY_CRON_SECRET;
+
+  try {
+    const response = await cronDiscoveryRoute.GET(
+      new Request("https://tickets.example/api/cron/events/discover", {
+        headers: { authorization: `Bearer ${VALID_CRON_SECRET}` },
+      }),
+    );
+
+    // With no licensed feeds configured, a correctly authenticated scheduler
+    // is a safe no-op rather than an authorization failure.
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), {
+      ok: true,
+      result: { status: "skipped", reason: "no-feeds" },
+    });
+  } finally {
+    if (previousVercel === undefined) {
+      delete process.env.CRON_SECRET;
+    } else {
+      process.env.CRON_SECRET = previousVercel;
+    }
+    if (previousLegacy === undefined) {
+      delete process.env.EVENT_DISCOVERY_CRON_SECRET;
+    } else {
+      process.env.EVENT_DISCOVERY_CRON_SECRET = previousLegacy;
+    }
+  }
 });
 
 test("admin discovery rejects cross-site requests before session lookup", async () => {

@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import { isAdminSession } from "@/lib/auth";
+import { isSameOriginRequest } from "@/lib/request-security";
 import { getTicket, markTicketCheckedIn } from "@/lib/store";
 
 export const runtime = "nodejs";
@@ -32,6 +33,13 @@ export async function POST(
   request: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  if (!isSameOriginRequest(request)) {
+    return Response.json(
+      { error: "Cross-site check-in request rejected." },
+      { status: 403 },
+    );
+  }
+
   if (!(await isAdminSession())) {
     return Response.json(
       { error: "Нужна е активна admin сесия за check-in." },

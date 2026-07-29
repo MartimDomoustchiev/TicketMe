@@ -22,15 +22,44 @@ type ProviderError = {
   statusCode?: number | null;
 };
 
-function usesResendTestingDomain(from: string | undefined): boolean {
+const EMAIL_ADDRESS_PATTERN =
+  /^[a-z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$/i;
+
+export function normalizeMailFrom(
+  configuredFrom: string | undefined,
+): string | null {
+  const raw = configuredFrom?.trim();
+  if (!raw || /[\r\n]/.test(raw)) {
+    return null;
+  }
+
+  const usesAngleAddress = raw.includes("<") || raw.includes(">");
+  const angleMatch = raw.match(/^[^<>]*<\s*([^<>\s]+)\s*>$/);
+  const address = usesAngleAddress ? angleMatch?.[1] : raw;
+
+  if (
+    !address ||
+    address.length > 254 ||
+    !EMAIL_ADDRESS_PATTERN.test(address)
+  ) {
+    return null;
+  }
+
+  return `TicketMe <${address}>`;
+}
+
+function usesResendTestingDomain(
+  from: string | null | undefined,
+): boolean {
   return /@resend\.dev(?:>|$)/i.test(from?.trim() ?? "");
 }
 
 export function isEmailReadyForArbitraryRecipients(): boolean {
+  const from = normalizeMailFrom(process.env.MAIL_FROM);
   return Boolean(
     process.env.RESEND_API_KEY?.trim() &&
-      process.env.MAIL_FROM?.trim() &&
-      !usesResendTestingDomain(process.env.MAIL_FROM),
+      from &&
+      !usesResendTestingDomain(from),
   );
 }
 
@@ -108,8 +137,8 @@ function emailDocument(input: {
               <td style="background:#10172a;padding:24px 32px;">
                 <table role="presentation" cellspacing="0" cellpadding="0" border="0">
                   <tr>
-                    <td style="background:#2457ff;border-radius:7px;color:#ffffff;font-size:12px;font-weight:700;letter-spacing:.4px;padding:8px 9px;">TF</td>
-                    <td style="padding-left:12px;color:#ffffff;font-size:20px;font-weight:700;">TicketForge</td>
+                    <td style="background:#2457ff;border-radius:7px;color:#ffffff;font-size:12px;font-weight:700;letter-spacing:.4px;padding:8px 9px;">TM</td>
+                    <td style="padding-left:12px;color:#ffffff;font-size:20px;font-weight:700;">TicketMe</td>
                   </tr>
                 </table>
               </td>
@@ -160,9 +189,9 @@ export async function sendEmail(
   input: EmailInput,
 ): Promise<EmailDelivery> {
   const apiKey = process.env.RESEND_API_KEY;
-  const from = process.env.MAIL_FROM;
+  const configuredFrom = process.env.MAIL_FROM;
 
-  if (!apiKey || !from) {
+  if (!apiKey || !configuredFrom) {
     if (process.env.NODE_ENV === "production") {
       throw new Error(
         "Transactional email is not configured. Set RESEND_API_KEY and MAIL_FROM.",
@@ -171,6 +200,13 @@ export async function sendEmail(
 
     await writeToOutbox(input);
     return "local-outbox";
+  }
+
+  const from = normalizeMailFrom(configuredFrom);
+  if (!from) {
+    throw new Error(
+      "Transactional email is not configured correctly. MAIL_FROM must contain one valid sender email address.",
+    );
   }
 
   if (
@@ -229,18 +265,18 @@ export async function sendVerificationEmail(input: {
   return sendEmail({
     to: input.to,
     subject: isEnglish
-      ? "Verify your email | TicketForge"
-      : "Потвърди имейла си | TicketForge",
+      ? "Verify your email | TicketMe"
+      : "Потвърди имейла си | TicketMe",
     html: emailDocument({
       locale,
       preheader: isEnglish
-        ? "Verify your email to activate your TicketForge account."
-        : "Потвърди имейла си, за да активираш профила си в TicketForge.",
+        ? "Verify your email to activate your TicketMe account."
+        : "Потвърди имейла си, за да активираш профила си в TicketMe.",
       eyebrow: isEnglish ? "Secure account activation" : "Сигурно активиране",
       title: isEnglish ? `Welcome, ${safeName}` : `Добре дошъл, ${safeName}`,
       introduction: isEnglish
-        ? "Confirm that this email belongs to you and finish creating your TicketForge account."
-        : "Потвърди, че този имейл е твой, и завърши създаването на профила си в TicketForge.",
+        ? "Confirm that this email belongs to you and finish creating your TicketMe account."
+        : "Потвърди, че този имейл е твой, и завърши създаването на профила си в TicketMe.",
       actionLabel: isEnglish
         ? "Verify email and activate account"
         : "Потвърди имейла и активирай профила",
@@ -249,8 +285,8 @@ export async function sendVerificationEmail(input: {
         ? "This secure link is valid for 30 minutes. If the button does not open, use the link below."
         : "Сигурният линк важи 30 минути. Ако бутонът не се отвори, използвай адреса по-долу.",
       footerText: isEnglish
-        ? "If you did not create this account, you can safely ignore this message. TicketForge will never ask for your password by email."
-        : "Ако не си създавал този профил, можеш спокойно да игнорираш съобщението. TicketForge никога няма да поиска паролата ти по имейл.",
+        ? "If you did not create this account, you can safely ignore this message. TicketMe will never ask for your password by email."
+        : "Ако не си създавал този профил, можеш спокойно да игнорираш съобщението. TicketMe никога няма да поиска паролата ти по имейл.",
     }),
   });
 }
@@ -290,8 +326,8 @@ export async function sendTicketEmail(input: {
       actionLabel: isEnglish ? "Open my ticket" : "Отвори моя билет",
       actionUrl: safeUrl,
       secondaryText: isEnglish
-        ? "The same ticket is stored securely in your TicketForge account. If the button does not open, use the link below."
-        : "Същият билет е съхранен сигурно в TicketForge профила ти. Ако бутонът не се отвори, използвай адреса по-долу.",
+        ? "The same ticket is stored securely in your TicketMe account. If the button does not open, use the link below."
+        : "Същият билет е съхранен сигурно в TicketMe профила ти. Ако бутонът не се отвори, използвай адреса по-долу.",
       footerText: isEnglish
         ? `Ticket ID: ${escapeHtml(input.ticketId)} · One-time admission · Do not forward this email or share the QR code.`
         : `Номер на билет: ${escapeHtml(input.ticketId)} · Еднократен вход · Не препращай този имейл и не споделяй QR кода.`,

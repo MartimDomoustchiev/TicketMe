@@ -42,7 +42,7 @@ function runCli(cliPath, args) {
 runCli(openNextCli, ["build"]);
 
 const bundleDirectory = mkdtempSync(
-  join(tmpdir(), "ticketforge-sites-worker-"),
+  join(tmpdir(), "ticketme-sites-worker-"),
 );
 
 try {

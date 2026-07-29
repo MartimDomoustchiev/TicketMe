@@ -1,13 +1,38 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { EVENT } from "../src/lib/event";
+import {
+  EVENT,
+  type CatalogEvent,
+  type TicketType,
+} from "../src/lib/event";
 import { buildStripeCheckoutSessionParams } from "../src/lib/stripe-checkout";
 
+const TICKET_TYPE: TicketType = {
+  id: "standard",
+  label: "Standard",
+  price: 50,
+  priceLabel: "€50.00",
+  currency: "EUR",
+  capacity: 100,
+  accent: "#2457ff",
+  description: "Organizer-owned inventory fixture.",
+};
+
+const INTERNAL_EVENT: CatalogEvent = {
+  ...EVENT,
+  id: "organizer-owned-event",
+  slug: "organizer-owned-event",
+  priceFrom: TICKET_TYPE.price,
+  priceLabel: TICKET_TYPE.priceLabel,
+  saleMode: "internal",
+  ticketTypes: [TICKET_TYPE],
+};
+
 test("hosted Checkout restricts payment methods to immediate card wallets", () => {
-  const ticketType = EVENT.ticketTypes[1];
+  const ticketType = TICKET_TYPE;
   const params = buildStripeCheckoutSessionParams({
     baseUrl: "https://tickets.example",
-    event: EVENT,
+    event: INTERNAL_EVENT,
     expiresAtUnix: 1_800_000_000,
     locale: "en",
     reservationId: "RSV-WALLETTEST0001",
@@ -18,7 +43,7 @@ test("hosted Checkout restricts payment methods to immediate card wallets", () =
   assert.equal(params.mode, "payment");
   assert.deepEqual(params.payment_method_types, ["card"]);
   assert.deepEqual(params.branding_settings, {
-    display_name: "TicketForge",
+    display_name: "TicketMe",
     background_color: "#ffffff",
     button_color: "#1d4ed8",
     border_style: "rounded",
@@ -34,11 +59,14 @@ test("hosted Checkout restricts payment methods to immediate card wallets", () =
     lineItems[0]?.price_data?.unit_amount,
     Math.round(ticketType.price * 100),
   );
+  assert.deepEqual(lineItems[0]?.price_data?.product_data?.images, [
+    new URL(INTERNAL_EVENT.image, "https://tickets.example/").href,
+  ]);
 });
 
 test("Checkout rejects an event and ticket currency mismatch", () => {
   const ticketType = {
-    ...EVENT.ticketTypes[0],
+    ...TICKET_TYPE,
     currency: "USD" as never,
   };
 
@@ -46,7 +74,7 @@ test("Checkout rejects an event and ticket currency mismatch", () => {
     () =>
       buildStripeCheckoutSessionParams({
         baseUrl: "https://tickets.example",
-        event: EVENT,
+        event: INTERNAL_EVENT,
         expiresAtUnix: 1_800_000_000,
         locale: "bg",
         reservationId: "RSV-CURRENCYMISMATCH",
@@ -55,4 +83,20 @@ test("Checkout rejects an event and ticket currency mismatch", () => {
       }),
     /CHECKOUT_CURRENCY_MISMATCH/,
   );
+});
+
+test("local Checkout omits an image Stripe cannot fetch over HTTPS", () => {
+  const params = buildStripeCheckoutSessionParams({
+    baseUrl: "http://localhost:3000",
+    event: INTERNAL_EVENT,
+    expiresAtUnix: 1_800_000_000,
+    locale: "en",
+    reservationId: "RSV-LOCALIMAGE0001",
+    ticketType: TICKET_TYPE,
+    buyerEmail: "local@example.com",
+  });
+  const lineItems = params.line_items;
+
+  assert.ok(Array.isArray(lineItems));
+  assert.equal(lineItems[0]?.price_data?.product_data?.images, undefined);
 });

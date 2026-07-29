@@ -45,11 +45,20 @@ function hasValidCronAuthorization(request: Request, expected: string): boolean 
   return provided !== null && matches;
 }
 
-export async function POST(request: Request) {
-  const cronSecret = process.env.EVENT_DISCOVERY_CRON_SECRET ?? "";
+function configuredCronSecret(): string {
+  const vercelSecret = process.env.CRON_SECRET?.trim() ?? "";
+  if (vercelSecret.length >= MINIMUM_CRON_SECRET_LENGTH) {
+    return vercelSecret;
+  }
+
+  return process.env.EVENT_DISCOVERY_CRON_SECRET?.trim() ?? "";
+}
+
+async function handleDiscovery(request: Request): Promise<Response> {
+  const cronSecret = configuredCronSecret();
   if (cronSecret.trim().length < MINIMUM_CRON_SECRET_LENGTH) {
     console.error(
-      "Event discovery cron is disabled because EVENT_DISCOVERY_CRON_SECRET is missing or too short.",
+      "Event discovery cron is disabled because CRON_SECRET is missing or too short.",
     );
     return jsonResponse(
       { error: "Event discovery scheduler is not configured." },
@@ -72,4 +81,17 @@ export async function POST(request: Request) {
     console.error("Scheduled event discovery failed.", error);
     return jsonResponse({ error: "Event discovery failed." }, 500);
   }
+}
+
+/**
+ * Vercel Cron invokes production routes with GET and signs the request through
+ * the standard CRON_SECRET bearer token. POST remains available for existing
+ * trusted schedulers and local operations.
+ */
+export async function GET(request: Request): Promise<Response> {
+  return handleDiscovery(request);
+}
+
+export async function POST(request: Request): Promise<Response> {
+  return handleDiscovery(request);
 }

@@ -18,7 +18,7 @@ export async function MarketplaceFooter() {
             <span className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-[#2457ff]">
               <Ticket size={19} aria-hidden="true" />
             </span>
-            TicketForge
+            TicketMe
           </Link>
           <p className="mt-4 max-w-md text-sm leading-6 text-slate-300">
             {dictionary.footer.description}
@@ -37,7 +37,7 @@ export async function MarketplaceFooter() {
 
         <div>
           <h2 className="text-sm font-black uppercase tracking-wider text-white">
-            TicketForge
+            TicketMe
           </h2>
           <ul className="mt-4 grid gap-3 text-sm text-slate-300">
             <li>
@@ -98,7 +98,7 @@ export async function MarketplaceFooter() {
 
       <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-3 py-5 text-xs text-slate-400">
         <p>
-          © {new Date().getFullYear()} TicketForge. {dictionary.footer.rights}
+          © {new Date().getFullYear()} TicketMe. {dictionary.footer.rights}
         </p>
         <div className="flex flex-wrap gap-x-4 gap-y-2">
           <Link

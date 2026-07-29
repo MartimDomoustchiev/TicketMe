@@ -8,7 +8,7 @@ import { getLocale } from "@/lib/i18n";
 export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = {
-  title: "Checkout | TicketForge",
+  title: "Checkout",
   robots: { index: false, follow: false },
 };
 

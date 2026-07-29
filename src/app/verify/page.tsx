@@ -65,7 +65,7 @@ export default async function VerifyEmailPage({
           <span className="inline-flex h-10 w-10 items-center justify-center rounded-xl bg-[#2864ff] text-white shadow-[0_10px_28px_rgba(40,100,255,0.3)]">
             <Ticket size={20} aria-hidden="true" />
           </span>
-          TicketForge
+          TicketMe
         </Link>
         <div className="flex items-center gap-2">
           <div className="rounded-lg bg-[#111a30]">
@@ -174,7 +174,7 @@ const COPY = {
     eyebrow: "Последна стъпка",
     title: "Потвърди своя имейл",
     description:
-      "Натисни бутона, за да активираш профила си и да продължиш сигурно към TicketForge.",
+      "Натисни бутона, за да активираш профила си и да продължиш сигурно към TicketMe.",
     validFor: "Линкът важи 30 минути",
     singleUse: "Еднократно потвърждение",
     confirm: "Потвърди и активирай профила",
@@ -193,7 +193,7 @@ const COPY = {
     eyebrow: "One last step",
     title: "Verify your email",
     description:
-      "Continue to activate your account and securely return to TicketForge.",
+      "Continue to activate your account and securely return to TicketMe.",
     validFor: "Link valid for 30 minutes",
     singleUse: "Single-use verification",
     confirm: "Verify and activate account",

@@ -94,8 +94,8 @@ export function safeReturnPath(
   }
 
   try {
-    const parsed = new URL(value, "https://ticketforge.local");
-    if (parsed.origin !== "https://ticketforge.local") {
+    const parsed = new URL(value, "https://ticketme.local");
+    if (parsed.origin !== "https://ticketme.local") {
       return fallback;
     }
     return `${parsed.pathname}${parsed.search}${parsed.hash}`;

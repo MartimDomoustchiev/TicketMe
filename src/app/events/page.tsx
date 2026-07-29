@@ -23,17 +23,32 @@ import { getLocale, localizeHref, type Locale } from "@/lib/i18n";
 
 export async function generateMetadata(): Promise<Metadata> {
   const locale = await getLocale();
-  return locale === "en"
-    ? {
-        title: "Events in Bulgaria",
-        description:
-          "Discover concerts, festivals, theatre, sports and cultural events across Bulgaria.",
-      }
-    : {
-        title: "Събития в България",
-        description:
-          "Открий концерти, фестивали, театър, спорт и културни събития в цяла България.",
-      };
+  const title =
+    locale === "en"
+      ? "Events in Bulgaria"
+      : "Събития в България";
+  const description =
+    locale === "en"
+      ? "Discover concerts, festivals, theatre, sports and cultural events across Bulgaria."
+      : "Открий концерти, фестивали, театър, спорт и културни събития в цяла България.";
+
+  return {
+    title,
+    description,
+    openGraph: {
+      title,
+      description,
+      type: "website",
+      images: [
+        {
+          url: "/events/festivals.webp",
+          width: 1600,
+          height: 1001,
+          alt: title,
+        },
+      ],
+    },
+  };
 }
 
 const PAGE_SIZE = 24;
@@ -84,8 +99,17 @@ function sortEvents(
   locale: Locale,
 ): CatalogEvent[] {
   return events.sort((left, right) => {
-    if (sort === "price-asc") return left.priceFrom - right.priceFrom;
-    if (sort === "price-desc") return right.priceFrom - left.priceFrom;
+    if (sort === "price-asc" || sort === "price-desc") {
+      if (left.priceAvailable !== right.priceAvailable) {
+        return left.priceAvailable ? -1 : 1;
+      }
+      if (left.priceAvailable && right.priceAvailable) {
+        return sort === "price-asc"
+          ? left.priceFrom - right.priceFrom
+          : right.priceFrom - left.priceFrom;
+      }
+      return eventTimestamp(left) - eventTimestamp(right);
+    }
     if (sort === "name") {
       return left.title.localeCompare(
         right.title,
@@ -107,10 +131,23 @@ export default async function EventsPage({
     listCatalogEvents(),
   ]);
   const copy = EVENTS_COPY[locale];
+  const hasPricedEvents = catalogEvents.some(
+    (event) => event.priceAvailable === true,
+  );
   const sortOptions: { value: SortOption; label: string }[] = [
     { value: "date", label: copy.soonest },
-    { value: "price-asc", label: copy.priceAscending },
-    { value: "price-desc", label: copy.priceDescending },
+    ...(hasPricedEvents
+      ? [
+          {
+            value: "price-asc" as const,
+            label: copy.priceAscending,
+          },
+          {
+            value: "price-desc" as const,
+            label: copy.priceDescending,
+          },
+        ]
+      : []),
     { value: "name", label: copy.nameSort },
   ];
   const query = firstValue(raw.q).trim().slice(0, 100);
@@ -142,7 +179,9 @@ export default async function EventsPage({
     ? requestedCategory
     : "";
   const city = cities.includes(requestedCity) ? requestedCity : "";
-  const sort = SORT_OPTIONS.includes(requestedSort as SortOption)
+  const sort =
+    SORT_OPTIONS.includes(requestedSort as SortOption) &&
+    (hasPricedEvents || !requestedSort.startsWith("price-"))
     ? (requestedSort as SortOption)
     : "date";
   const normalizedQuery = query.toLocaleLowerCase(

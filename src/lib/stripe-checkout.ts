@@ -18,10 +18,17 @@ export function buildStripeCheckoutSessionParams(
     throw new Error("CHECKOUT_CURRENCY_MISMATCH");
   }
 
+  const productImageUrl = new URL(
+    input.event.image,
+    `${input.baseUrl.replace(/\/+$/u, "")}/`,
+  );
+  const productImages =
+    productImageUrl.protocol === "https:" ? [productImageUrl.href] : undefined;
+
   return {
     mode: "payment",
     branding_settings: {
-      display_name: "TicketForge",
+      display_name: "TicketMe",
       background_color: "#ffffff",
       button_color: "#1d4ed8",
       border_style: "rounded",
@@ -46,7 +53,7 @@ export function buildStripeCheckoutSessionParams(
           product_data: {
             name: input.event.title,
             description: `${input.ticketType.label} · ${input.event.venue}`,
-            images: [input.event.image],
+            ...(productImages ? { images: productImages } : {}),
             metadata: {
               eventId: input.event.id,
               ticketType: input.ticketType.id,

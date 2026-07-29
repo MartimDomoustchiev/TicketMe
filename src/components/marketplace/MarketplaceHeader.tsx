@@ -1,4 +1,11 @@
-import { LogOut, MapPin, Search, Ticket, UserRound } from "lucide-react";
+import {
+  LogOut,
+  MapPin,
+  Menu,
+  Search,
+  Ticket,
+  UserRound,
+} from "lucide-react";
 import Link from "next/link";
 import { LocaleSwitcher } from "@/components/marketplace/LocaleSwitcher";
 import { getActiveAccount } from "@/lib/auth";
@@ -64,8 +71,14 @@ export async function MarketplaceHeader({
             <span className="inline-flex h-10 w-10 items-center justify-center rounded-xl bg-[#2457ff] text-white shadow-[0_8px_20px_rgba(36,87,255,0.25)] transition group-hover:-rotate-3">
               <Ticket size={21} aria-hidden="true" />
             </span>
-            <span className="hidden text-xl font-black tracking-[-0.04em] sm:inline">
-              Ticket<span className="text-[#2457ff]">Forge</span>
+            <span
+              className={`text-xl font-black tracking-[-0.04em] ${
+                account
+                  ? "hidden sm:inline"
+                  : "hidden min-[360px]:inline"
+              }`}
+            >
+              Ticket<span className="text-[#2457ff]">Me</span>
             </span>
           </Link>
 
@@ -100,6 +113,46 @@ export async function MarketplaceHeader({
             >
               {dictionary.header.allEvents}
             </Link>
+            <details className="group relative lg:hidden">
+              <summary
+                className="inline-flex h-10 w-10 cursor-pointer list-none items-center justify-center rounded-lg border border-slate-200 text-slate-700 transition hover:border-slate-300 hover:bg-slate-100 hover:text-slate-950 [&::-webkit-details-marker]:hidden"
+                title={dictionary.header.browseMenu}
+              >
+                <Menu size={19} aria-hidden="true" />
+                <span className="sr-only">
+                  {dictionary.header.browseMenu}
+                </span>
+              </summary>
+              <nav
+                aria-label={dictionary.header.browseMenu}
+                className="absolute right-0 top-12 z-50 w-[min(20rem,calc(100vw-2rem))] overflow-hidden rounded-2xl border border-slate-200 bg-white p-2 shadow-2xl shadow-slate-950/15"
+              >
+                <Link
+                  href={localizeHref(locale, "/events")}
+                  className="flex min-h-11 items-center rounded-xl px-3.5 text-sm font-black text-slate-950 transition hover:bg-blue-50 hover:text-[#2457ff]"
+                >
+                  {dictionary.header.allEvents}
+                </Link>
+                {navItems.map((item) => (
+                  <Link
+                    key={item.value}
+                    href={localizeHref(
+                      locale,
+                      `/events?category=${item.value}`,
+                    )}
+                    className="flex min-h-11 items-center rounded-xl px-3.5 text-sm font-bold text-slate-700 transition hover:bg-blue-50 hover:text-[#2457ff]"
+                  >
+                    {item.label}
+                  </Link>
+                ))}
+                <Link
+                  href={localizeHref(locale, "/events?sort=date")}
+                  className="flex min-h-11 items-center rounded-xl px-3.5 text-sm font-black text-[#2457ff] transition hover:bg-blue-50 hover:text-blue-800"
+                >
+                  {dictionary.header.upcoming}
+                </Link>
+              </nav>
+            </details>
             <Link
               href={accountHref}
               className="inline-flex h-10 items-center gap-2 rounded-lg bg-[#10172a] px-3.5 text-sm font-extrabold text-white transition hover:bg-[#2457ff]"
@@ -122,6 +175,39 @@ export async function MarketplaceHeader({
             )}
           </div>
         </div>
+
+        <form
+          action={localizeHref(locale, "/events")}
+          method="get"
+          role="search"
+          className="mx-auto flex max-w-7xl border-t border-slate-100 py-3 md:hidden"
+        >
+          <label htmlFor="mobile-event-search" className="sr-only">
+            {dictionary.header.searchLabel}
+          </label>
+          <div className="relative min-w-0 flex-1">
+            <Search
+              className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400"
+              size={18}
+              aria-hidden="true"
+            />
+            <input
+              id="mobile-event-search"
+              name="q"
+              type="search"
+              defaultValue={query}
+              placeholder={dictionary.header.searchPlaceholder}
+              className="h-11 w-full rounded-l-xl border border-r-0 border-slate-300 bg-slate-50 pl-10 pr-3 text-sm font-medium text-slate-950 outline-none transition placeholder:text-slate-500 focus:border-[#2457ff] focus:bg-white focus:ring-4 focus:ring-blue-100"
+            />
+          </div>
+          <button
+            type="submit"
+            aria-label={dictionary.header.searchLabel}
+            className="inline-flex h-11 w-12 shrink-0 items-center justify-center rounded-r-xl bg-[#2457ff] text-white transition hover:bg-blue-700 focus-visible:ring-4 focus-visible:ring-blue-200"
+          >
+            <Search size={18} aria-hidden="true" />
+          </button>
+        </form>
 
         <nav
           aria-label={dictionary.header.eventCategories}

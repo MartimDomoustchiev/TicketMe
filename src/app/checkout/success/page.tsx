@@ -24,7 +24,7 @@ import { fulfillStripeCheckoutSession } from "@/lib/stripe-fulfillment";
 export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = {
-  title: "Payment confirmation | TicketForge",
+  title: "Payment confirmation",
   robots: { index: false, follow: false },
 };
 
