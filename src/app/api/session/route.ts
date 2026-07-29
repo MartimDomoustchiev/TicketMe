@@ -266,7 +266,7 @@ async function handleSignup(input: {
       input.locale,
       "signup",
       input.next,
-      "generic",
+      "service-unavailable",
       email,
     );
   }
@@ -295,7 +295,7 @@ async function handleSignup(input: {
       input.locale,
       "signup",
       input.next,
-      "generic",
+      "service-unavailable",
       email,
     );
   }
@@ -408,7 +408,7 @@ async function handleLogin(input: {
       input.locale,
       "login",
       input.next,
-      "generic",
+      "service-unavailable",
       email,
     );
   }
@@ -442,7 +442,7 @@ async function handleLogin(input: {
       input.locale,
       "login",
       input.next,
-      "generic",
+      "service-unavailable",
       email,
     );
   }
@@ -496,7 +496,7 @@ async function handleResend(input: {
       input.locale,
       "login",
       input.next,
-      "generic",
+      "service-unavailable",
       email,
     );
   }
@@ -585,7 +585,7 @@ export async function POST(request: Request) {
         locale,
         "login",
         next,
-        "generic",
+        "service-unavailable",
       );
     }
     return seeOther(request, `/${locale}`);

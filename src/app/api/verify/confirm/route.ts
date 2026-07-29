@@ -15,10 +15,15 @@ function requestContext(request: Request, rawNext: string | null) {
   return { locale, next };
 }
 
-function authErrorUrl(request: Request, locale: Locale, next: string): URL {
+function authErrorUrl(
+  request: Request,
+  locale: Locale,
+  next: string,
+  error = "generic",
+): URL {
   const url = new URL(`/${locale}/login`, request.url);
   url.searchParams.set("mode", "login");
-  url.searchParams.set("error", "generic");
+  url.searchParams.set("error", error);
   url.searchParams.set("next", next);
   return url;
 }
@@ -81,7 +86,10 @@ export async function POST(request: Request): Promise<Response> {
     await createUserSession(user.id);
   } catch (error) {
     console.error("Email verification failed.", error);
-    return seeOther(authErrorUrl(request, locale, next), request);
+    return seeOther(
+      authErrorUrl(request, locale, next, "service-unavailable"),
+      request,
+    );
   }
 
   return seeOther(next, request);

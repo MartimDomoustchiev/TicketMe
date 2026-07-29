@@ -76,11 +76,23 @@ export default async function LoginPage({
 }: {
   searchParams: Promise<LoginSearchParams>;
 }) {
-  const [locale, query, account] = await Promise.all([
+  const [locale, query, accountState] = await Promise.all([
     getLocale(),
     searchParams,
-    getActiveAccount(),
+    getActiveAccount()
+      .then((account) => ({
+        account,
+        serviceUnavailable: false,
+      }))
+      .catch((error) => {
+        console.error("Unable to load the active account.", error);
+        return {
+          account: null,
+          serviceUnavailable: true,
+        };
+      }),
   ]);
+  const { account } = accountState;
   const copy = PAGE_COPY[locale];
 
   if (account?.role === "admin") {
@@ -138,9 +150,9 @@ export default async function LoginPage({
               <Sparkles size={15} aria-hidden="true" />
               {copy.eyebrow}
             </p>
-            <h1 className="mt-7 text-5xl font-black leading-[1.02] tracking-[-0.055em] 2xl:text-[3.6rem]">
+            <p className="mt-7 text-5xl font-black leading-[1.02] tracking-[-0.055em] 2xl:text-[3.6rem]">
               {copy.heroTitle}
-            </h1>
+            </p>
             <p className="mt-5 max-w-lg text-base leading-7 text-slate-200 2xl:text-lg 2xl:leading-8">
               {copy.heroText}
             </p>
@@ -178,7 +190,7 @@ export default async function LoginPage({
         </section>
 
         <section className="flex min-h-screen flex-col bg-white">
-          <header className="flex min-h-20 items-center justify-between gap-4 border-b border-slate-200/80 px-4 sm:px-8 lg:px-12">
+          <header className="flex min-h-16 items-center justify-between gap-4 border-b border-slate-200/80 px-4 sm:px-8 lg:px-12">
             <Link
               href={localizeHref(locale, "/")}
               aria-label={copy.homeAria}
@@ -205,18 +217,18 @@ export default async function LoginPage({
             </div>
           </header>
 
-          <div className="flex flex-1 items-center justify-center px-4 py-10 sm:px-8 sm:py-14 lg:px-12">
-            <div className="w-full max-w-[520px]">
-              <div className="mb-7">
-                <span className="inline-flex h-11 w-11 items-center justify-center rounded-xl bg-blue-50 text-[#2864ff] ring-1 ring-blue-100">
-                  <LockKeyhole size={21} aria-hidden="true" />
+          <div className="flex flex-1 items-center justify-center px-4 py-7 sm:px-8 sm:py-9 lg:px-12">
+            <div className="w-full max-w-[540px]">
+              <div className="mb-5">
+                <span className="inline-flex h-10 w-10 items-center justify-center rounded-xl bg-blue-50 text-[#2864ff] ring-1 ring-blue-100">
+                  <LockKeyhole size={20} aria-hidden="true" />
                 </span>
-                <h2 className="mt-5 text-3xl font-black tracking-[-0.045em] text-slate-950 sm:text-[2.15rem]">
+                <h1 className="mt-4 text-3xl font-black tracking-[-0.045em] text-slate-950 sm:text-[2.15rem]">
                   {mode === "signup"
                     ? copy.signupTitle
                     : copy.loginTitle}
-                </h2>
-                <p className="mt-2.5 max-w-md text-sm leading-6 text-slate-600">
+                </h1>
+                <p className="mt-2 max-w-md text-sm leading-6 text-slate-600">
                   {mode === "signup"
                     ? copy.signupDescription
                     : copy.loginDescription}
@@ -228,7 +240,11 @@ export default async function LoginPage({
                 mode={mode}
                 next={next}
                 email={email}
-                error={first(query.error)}
+                error={
+                  accountState.serviceUnavailable
+                    ? "service-unavailable"
+                    : first(query.error)
+                }
                 sent={first(query.sent)}
                 loginHref={loginHref}
                 signupHref={signupHref}
@@ -236,7 +252,7 @@ export default async function LoginPage({
                 localEmailFallback={localEmailFallback}
               />
 
-              <div className="mt-7 flex flex-wrap items-center justify-center gap-x-5 gap-y-2 text-xs font-semibold text-slate-500">
+              <div className="mt-5 flex flex-wrap items-center justify-center gap-x-5 gap-y-2 text-xs font-semibold text-slate-500">
                 <span className="inline-flex items-center gap-1.5">
                   <CheckCircle2
                     size={14}

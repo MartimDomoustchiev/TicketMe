@@ -328,3 +328,39 @@ export async function assertDatabaseSchema(
     );
   }
 }
+
+export async function authDatabaseSchemaStatus(
+  client: SqlClient = databaseSql(),
+): Promise<{ ready: boolean; tls: boolean }> {
+  const rows = await client`
+    SELECT
+      to_regclass('public.users') IS NOT NULL AS users,
+      to_regclass('public.auth_sessions') IS NOT NULL AS auth_sessions,
+      to_regclass('public.email_verification_tokens') IS NOT NULL
+        AS email_verification_tokens,
+      COALESCE(
+        (SELECT ssl FROM pg_stat_ssl WHERE pid = pg_backend_pid()),
+        FALSE
+      ) AS tls
+  `;
+  const row = rows[0];
+  return {
+    ready: Boolean(
+      row?.users &&
+        row.auth_sessions &&
+        row.email_verification_tokens,
+    ),
+    tls: Boolean(row?.tls),
+  };
+}
+
+export async function assertAuthDatabaseSchema(
+  client: SqlClient = databaseSql(),
+): Promise<void> {
+  const status = await authDatabaseSchemaStatus(client);
+  if (!status.ready) {
+    throw new Error(
+      "The PostgreSQL authentication schema is not ready. Run npm run db:migrate.",
+    );
+  }
+}

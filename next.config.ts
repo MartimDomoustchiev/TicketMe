@@ -17,6 +17,12 @@ const nextConfig: NextConfig = {
   // Let Wrangler resolve Postgres.js through its `workerd` conditional export
   // instead of baking the Node TCP implementation into the Next.js bundle.
   serverExternalPackages: ["postgres"],
+  // DATABASE_SSL_CA_PATH is resolved at runtime. Next.js cannot infer that
+  // dynamic filesystem dependency, so include the public AWS trust bundle in
+  // every server trace that may open an authenticated session or query RDS.
+  outputFileTracingIncludes: {
+    "/*": ["./global-bundle.pem"],
+  },
   async headers() {
     return [
       {

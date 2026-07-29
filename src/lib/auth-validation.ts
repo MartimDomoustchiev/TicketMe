@@ -9,6 +9,7 @@ export type AuthErrorCode =
   | "account-exists"
   | "rate-limit"
   | "email-delivery"
+  | "service-unavailable"
   | "generic";
 
 export function normalizeEmail(value: string): string {

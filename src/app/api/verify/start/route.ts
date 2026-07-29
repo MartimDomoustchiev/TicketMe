@@ -41,25 +41,41 @@ export async function POST(request: Request) {
     );
   }
 
+  let verification;
   try {
-    const verification = await issueEmailVerification(email);
-    if (verification) {
-      const verificationUrl = new URL(
-        `/${locale}/verify`,
-        getBaseUrl(request),
-      );
-      verificationUrl.searchParams.set("token", verification.token);
-      verificationUrl.searchParams.set("next", next);
+    verification = await issueEmailVerification(email);
+  } catch (error) {
+    console.error("Verification account lookup failed.", error);
+    return Response.json(
+      { error: "service-unavailable" },
+      {
+        status: 503,
+        headers: { "Retry-After": "30" },
+      },
+    );
+  }
+
+  if (verification) {
+    const verificationUrl = new URL(
+      `/${locale}/verify`,
+      getBaseUrl(request),
+    );
+    verificationUrl.searchParams.set("token", verification.token);
+    verificationUrl.searchParams.set("next", next);
+    try {
       await sendVerificationEmail({
         to: verification.user.email,
         name: verification.user.name,
         verificationUrl: verificationUrl.toString(),
         locale,
       });
+    } catch (error) {
+      console.error("Verification email delivery failed.", error);
+      return Response.json(
+        { error: "email-delivery" },
+        { status: 502 },
+      );
     }
-  } catch (error) {
-    console.error("Verification email request failed.", error);
-    return Response.json({ error: "email-delivery" }, { status: 502 });
   }
 
   // Generic success prevents account discovery through this compatibility API.

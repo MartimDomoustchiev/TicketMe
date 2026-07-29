@@ -215,6 +215,67 @@ test("session form outcomes use 303 so credentials are never reposted", async ()
   assert.equal(location.searchParams.get("next"), "/en/events");
 });
 
+test("database outages use a dedicated account-service error", async () => {
+  const keys = [
+    "NODE_ENV",
+    "DATABASE_URL",
+    "DATABASE_HOST",
+    "DATABASE_NAME",
+    "DATABASE_USER",
+    "DATABASE_PASSWORD",
+  ] as const;
+  const previous = new Map(
+    keys.map((key) => [key, process.env[key]]),
+  );
+
+  Reflect.set(process.env, "NODE_ENV", "production");
+  delete process.env.DATABASE_URL;
+  delete process.env.DATABASE_HOST;
+  delete process.env.DATABASE_NAME;
+  delete process.env.DATABASE_USER;
+  delete process.env.DATABASE_PASSWORD;
+
+  try {
+    const response = await sessionPost(
+      new Request("https://tickets.example/api/session", {
+        method: "POST",
+        headers: {
+          "content-type": "application/x-www-form-urlencoded",
+          host: "tickets.example",
+          origin: "https://tickets.example",
+          "sec-fetch-site": "same-origin",
+        },
+        body: new URLSearchParams({
+          intent: "signup",
+          locale: "en",
+          name: "Production Candidate",
+          email: "outage-candidate@example.com",
+          password: "Professional9",
+          confirmPassword: "Professional9",
+          terms: "accepted",
+          next: "/en/events",
+        }),
+      }),
+    );
+
+    assert.equal(response.status, 303);
+    const location = new URL(response.headers.get("location")!);
+    assert.equal(location.pathname, "/en/login");
+    assert.equal(location.searchParams.get("mode"), "signup");
+    assert.equal(
+      location.searchParams.get("error"),
+      "service-unavailable",
+    );
+    assert.equal(location.searchParams.get("next"), "/en/events");
+  } finally {
+    for (const key of keys) {
+      const value = previous.get(key);
+      if (value === undefined) Reflect.deleteProperty(process.env, key);
+      else Reflect.set(process.env, key, value);
+    }
+  }
+});
+
 test("local signup continues directly to truthful email verification", async () => {
   const previousApiKey = process.env.RESEND_API_KEY;
   const previousMailFrom = process.env.MAIL_FROM;

@@ -14,7 +14,7 @@ import {
   type UserRole,
 } from "@/lib/auth-store-types";
 import {
-  assertDatabaseSchema,
+  assertAuthDatabaseSchema,
   databaseAutoMigrateEnabled,
   databaseSql,
 } from "@/lib/database";
@@ -80,7 +80,7 @@ async function ensureSchema(): Promise<void> {
   globalThis.__ticketForgeAuthSchemaReady ??= (
     databaseAutoMigrateEnabled()
       ? prepareSchema()
-      : assertDatabaseSchema()
+      : assertAuthDatabaseSchema()
   ).catch((error) => {
       globalThis.__ticketForgeAuthSchemaReady = undefined;
       throw error;

@@ -15,7 +15,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useFormStatus } from "react-dom";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 export type AuthMode = "login" | "signup";
 type Locale = "bg" | "en";
@@ -61,6 +61,18 @@ export function AuthPortal({
         (copy.errors[error as keyof typeof copy.errors] ??
           copy.errors.generic);
   const errorField = error ? ERROR_FIELDS[error] : undefined;
+  const statePanelRef = useRef<HTMLDivElement>(null);
+  const serviceUnavailable = error === "service-unavailable";
+  const verificationDeliveryFailed =
+    error === "email-delivery" && Boolean(email);
+  const verificationSent =
+    !error && sent === "verification" && Boolean(email);
+
+  useEffect(() => {
+    if (error || sent === "verification") {
+      statePanelRef.current?.focus();
+    }
+  }, [error, sent]);
 
   if (account) {
     return (
@@ -90,117 +102,247 @@ export function AuthPortal({
         />
       </nav>
 
-      {sent === "verification" && (
-        <div
-          role="status"
-          className={`mt-5 rounded-2xl border p-4 ${
-            localEmailFallback
-              ? "border-amber-200 bg-amber-50 text-amber-950"
-              : "border-emerald-200 bg-emerald-50 text-emerald-950"
-          }`}
-        >
-          <div className="flex items-start gap-3">
-            <MailCheck
-              size={20}
-              className={`mt-0.5 shrink-0 ${
-                localEmailFallback
-                  ? "text-amber-700"
-                  : "text-emerald-700"
-              }`}
-              aria-hidden="true"
-            />
-            <div className="min-w-0">
-              <p className="text-sm font-extrabold">
-                {localEmailFallback
-                  ? copy.localDeliveryTitle
-                  : copy.verificationSentTitle}
-              </p>
-              <p
-                className={`mt-1 break-words text-sm leading-6 ${
-                  localEmailFallback
-                    ? "text-amber-800"
-                    : "text-emerald-800"
-                }`}
-              >
-                {localEmailFallback
-                  ? copy.localDeliveryText
-                  : copy.verificationSentText}{" "}
-                {!localEmailFallback && email && (
-                  <strong>{email}</strong>
-                )}
-              </p>
-              {email && (
-                <ResendForm
-                  locale={locale}
-                  email={email}
-                  next={next}
-                  label={
-                    localEmailFallback
-                      ? copy.continueVerification
-                      : copy.resend
-                  }
-                />
-              )}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {errorMessage && (
-        <div
-          id="auth-error"
-          role="alert"
-          className="mt-5 rounded-2xl border border-rose-200 bg-rose-50 p-4 text-rose-950"
-        >
-          <div className="flex items-start gap-3">
-            <AlertCircle
-              size={20}
-              className="mt-0.5 shrink-0 text-rose-600"
-              aria-hidden="true"
-            />
-            <div className="min-w-0">
-              <p className="text-sm font-extrabold">{copy.problemTitle}</p>
-              <p className="mt-1 text-sm leading-6 text-rose-800">
-                {errorMessage}
-              </p>
-              {(error === "unverified" || error === "email-delivery") &&
-                email && (
-                  <ResendForm
-                    locale={locale}
-                    email={email}
-                    next={next}
-                    label={
-                      localEmailFallback
-                        ? copy.continueVerification
-                        : copy.resend
-                    }
-                  />
-                )}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {mode === "login" ? (
-        <LoginForm
+      {serviceUnavailable ? (
+        <ServiceUnavailablePanel
+          panelRef={statePanelRef}
           locale={locale}
-          next={next}
+          mode={mode}
+          retryHref={mode === "login" ? loginHref : signupHref}
+          copy={copy}
+        />
+      ) : verificationDeliveryFailed || verificationSent ? (
+        <VerificationStatePanel
+          panelRef={statePanelRef}
+          locale={locale}
           email={email}
-          errorField={errorField}
-          hasError={Boolean(errorMessage)}
+          next={next}
+          failed={verificationDeliveryFailed}
+          loginHref={loginHref}
+          localEmailFallback={localEmailFallback}
           copy={copy}
         />
       ) : (
-        <SignupForm
-          locale={locale}
-          next={next}
-          email={email}
-          errorField={errorField}
-          hasError={Boolean(errorMessage)}
-          copy={copy}
-          localEmailFallback={localEmailFallback}
-        />
+        <>
+          {errorMessage && (
+            <div
+              ref={statePanelRef}
+              id="auth-error"
+              role="alert"
+              tabIndex={-1}
+              className="mt-5 rounded-2xl border border-rose-200 bg-rose-50 p-4 text-rose-950 outline-none focus-visible:ring-4 focus-visible:ring-rose-100"
+            >
+              <div className="flex items-start gap-3">
+                <AlertCircle
+                  size={20}
+                  className="mt-0.5 shrink-0 text-rose-600"
+                  aria-hidden="true"
+                />
+                <div className="min-w-0">
+                  <p className="text-sm font-extrabold">
+                    {copy.problemTitle}
+                  </p>
+                  <p className="mt-1 text-sm leading-6 text-rose-800">
+                    {errorMessage}
+                  </p>
+                  {error === "unverified" && email && (
+                    <ResendForm
+                      locale={locale}
+                      email={email}
+                      next={next}
+                      label={
+                        localEmailFallback
+                          ? copy.continueVerification
+                          : copy.resend
+                      }
+                      variant="secondary"
+                    />
+                  )}
+                  {error === "account-exists" && (
+                    <Link
+                      href={loginHref}
+                      className="mt-3 inline-flex min-h-11 items-center gap-2 rounded-xl bg-rose-900 px-4 text-sm font-extrabold text-white transition hover:bg-rose-800 focus-visible:ring-4 focus-visible:ring-rose-200"
+                    >
+                      {copy.goToLogin}
+                      <ArrowRight size={16} aria-hidden="true" />
+                    </Link>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {mode === "login" ? (
+            <LoginForm
+              locale={locale}
+              next={next}
+              email={email}
+              errorField={errorField}
+              hasError={Boolean(errorField)}
+              copy={copy}
+            />
+          ) : (
+            <SignupForm
+              locale={locale}
+              next={next}
+              email={email}
+              errorField={errorField}
+              hasError={Boolean(errorField)}
+              copy={copy}
+              localEmailFallback={localEmailFallback}
+            />
+          )}
+        </>
       )}
+    </div>
+  );
+}
+
+function ServiceUnavailablePanel({
+  panelRef,
+  locale,
+  mode,
+  retryHref,
+  copy,
+}: {
+  panelRef: React.RefObject<HTMLDivElement | null>;
+  locale: Locale;
+  mode: AuthMode;
+  retryHref: string;
+  copy: (typeof AUTH_COPY)[Locale];
+}) {
+  return (
+    <div
+      ref={panelRef}
+      id="auth-error"
+      role="alert"
+      tabIndex={-1}
+      className="mt-5 overflow-hidden rounded-2xl border border-amber-200 bg-amber-50 text-amber-950 outline-none focus-visible:ring-4 focus-visible:ring-amber-100"
+    >
+      <div className="border-b border-amber-200/80 p-5">
+        <span className="inline-flex h-11 w-11 items-center justify-center rounded-xl bg-amber-100 text-amber-700 ring-1 ring-amber-200">
+          <AlertCircle size={22} aria-hidden="true" />
+        </span>
+        <p className="mt-4 text-lg font-black tracking-[-0.025em]">
+          {copy.serviceUnavailableTitle}
+        </p>
+        <p className="mt-2 text-sm leading-6 text-amber-900">
+          {mode === "signup"
+            ? copy.serviceUnavailableSignup
+            : copy.serviceUnavailableLogin}
+        </p>
+      </div>
+      <div className="grid gap-2.5 bg-white/70 p-4 sm:grid-cols-2">
+        <Link
+          href={retryHref}
+          className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-[#111a30] px-4 text-sm font-black text-white transition hover:bg-[#2864ff] focus-visible:ring-4 focus-visible:ring-blue-200"
+        >
+          {copy.tryAgain}
+          <ArrowRight size={16} aria-hidden="true" />
+        </Link>
+        <Link
+          href={`/${locale}/events`}
+          className="inline-flex min-h-11 items-center justify-center rounded-xl border border-slate-300 bg-white px-4 text-sm font-extrabold text-slate-800 transition hover:border-blue-300 hover:text-[#1f55e5] focus-visible:ring-4 focus-visible:ring-blue-100"
+        >
+          {copy.browseEvents}
+        </Link>
+      </div>
+    </div>
+  );
+}
+
+function VerificationStatePanel({
+  panelRef,
+  locale,
+  email,
+  next,
+  failed,
+  loginHref,
+  localEmailFallback,
+  copy,
+}: {
+  panelRef: React.RefObject<HTMLDivElement | null>;
+  locale: Locale;
+  email: string;
+  next: string;
+  failed: boolean;
+  loginHref: string;
+  localEmailFallback: boolean;
+  copy: (typeof AUTH_COPY)[Locale];
+}) {
+  return (
+    <div
+      ref={panelRef}
+      role={failed ? "alert" : "status"}
+      tabIndex={-1}
+      className={`mt-5 overflow-hidden rounded-2xl border outline-none focus-visible:ring-4 ${
+        failed
+          ? "border-amber-200 bg-amber-50 text-amber-950 focus-visible:ring-amber-100"
+          : "border-emerald-200 bg-emerald-50 text-emerald-950 focus-visible:ring-emerald-100"
+      }`}
+    >
+      <div
+        className={`h-1.5 ${
+          failed
+            ? "bg-gradient-to-r from-amber-500 to-orange-400"
+            : "bg-gradient-to-r from-emerald-500 to-cyan-400"
+        }`}
+      />
+      <div className="p-5">
+        <span
+          className={`inline-flex h-11 w-11 items-center justify-center rounded-xl ring-1 ${
+            failed
+              ? "bg-amber-100 text-amber-700 ring-amber-200"
+              : "bg-emerald-100 text-emerald-700 ring-emerald-200"
+          }`}
+        >
+          <MailCheck size={22} aria-hidden="true" />
+        </span>
+        <p className="mt-4 text-lg font-black tracking-[-0.025em]">
+          {failed
+            ? copy.verificationDelayedTitle
+            : copy.verificationSentTitle}
+        </p>
+        <p
+          className={`mt-2 break-words text-sm leading-6 ${
+            failed ? "text-amber-900" : "text-emerald-900"
+          }`}
+        >
+          {failed
+            ? copy.verificationDelayedText
+            : copy.verificationSentText}{" "}
+          <strong>{email}</strong>
+        </p>
+        {failed && (
+          <p className="mt-2 text-sm font-extrabold text-amber-950">
+            {copy.noNeedToRegister}
+          </p>
+        )}
+        <ResendForm
+          locale={locale}
+          email={email}
+          next={next}
+          label={
+            localEmailFallback
+              ? copy.continueVerification
+              : copy.resend
+          }
+          variant="primary"
+        />
+        <div className="mt-3 grid gap-2 sm:grid-cols-2">
+          <Link
+            href={loginHref}
+            className="inline-flex min-h-11 items-center justify-center rounded-xl border border-slate-300 bg-white px-4 text-sm font-extrabold text-slate-800 transition hover:border-blue-300 hover:text-[#1f55e5]"
+          >
+            {copy.goToLogin}
+          </Link>
+          <Link
+            href={`/${locale}/events`}
+            className="inline-flex min-h-11 items-center justify-center rounded-xl px-4 text-sm font-extrabold text-slate-600 transition hover:bg-white/80 hover:text-[#1f55e5]"
+          >
+            {copy.browseEvents}
+          </Link>
+        </div>
+      </div>
     </div>
   );
 }
@@ -226,7 +368,7 @@ function LoginForm({
     <form
       action="/api/session"
       method="post"
-      className="mt-6 grid gap-4"
+      className="mt-5 grid gap-3.5"
     >
       <input type="hidden" name="intent" value="login" />
       <input type="hidden" name="locale" value={locale} />
@@ -338,7 +480,7 @@ function SignupForm({
     <form
       action="/api/session"
       method="post"
-      className="mt-6 grid gap-4"
+      className="mt-5 grid gap-3.5"
     >
       <input type="hidden" name="intent" value="signup" />
       <input type="hidden" name="locale" value={locale} />
@@ -477,9 +619,8 @@ function SignupForm({
         </span>
       </FieldLabel>
 
-      <label
-        htmlFor="signup-terms"
-        className={`flex cursor-pointer items-start gap-3 rounded-xl border p-3.5 transition hover:bg-slate-50 ${
+      <div
+        className={`flex items-start gap-3 rounded-xl border p-3.5 transition hover:bg-slate-50 ${
           errorField === "terms"
             ? "border-rose-300 bg-rose-50"
             : "border-slate-200 bg-white"
@@ -493,10 +634,16 @@ function SignupForm({
           required
           aria-invalid={errorField === "terms"}
           aria-describedby={errorDescription}
-          className="mt-0.5 h-4 w-4 shrink-0 accent-[#2864ff]"
+          aria-labelledby="signup-terms-label"
+          className="mt-0.5 h-5 w-5 shrink-0 accent-[#2864ff]"
         />
-        <span className="text-xs font-semibold leading-5 text-slate-600">
-          {copy.termsPrefix}{" "}
+        <span
+          id="signup-terms-label"
+          className="text-xs font-semibold leading-5 text-slate-600"
+        >
+          <label htmlFor="signup-terms" className="cursor-pointer">
+            {copy.termsPrefix}
+          </label>{" "}
           <Link
             href={`/${locale}/terms`}
             target="_blank"
@@ -514,7 +661,7 @@ function SignupForm({
           </Link>
           .
         </span>
-      </label>
+      </div>
 
       <SubmitButton label={copy.signupButton} />
 
@@ -565,7 +712,7 @@ function PasswordStrength({
           />
         ))}
       </div>
-      <div className="mt-2 flex items-start justify-between gap-4 text-[11px] leading-4">
+      <div className="mt-2 flex items-start justify-between gap-4 text-xs leading-4">
         <span className="text-slate-500">{copy.passwordGuidance}</span>
         <span
           aria-live="polite"
@@ -691,26 +838,57 @@ function ResendForm({
   email,
   next,
   label,
+  variant = "secondary",
 }: {
   locale: Locale;
   email: string;
   next: string;
   label: string;
+  variant?: "primary" | "secondary";
 }) {
   return (
-    <form action="/api/session" method="post" className="mt-2">
+    <form action="/api/session" method="post" className="mt-3">
       <input type="hidden" name="intent" value="resend" />
       <input type="hidden" name="locale" value={locale} />
       <input type="hidden" name="next" value={next} />
       <input type="hidden" name="mode" value="login" />
       <input type="hidden" name="email" value={email} />
-      <button
-        type="submit"
-        className="text-xs font-extrabold text-current underline decoration-current/30 underline-offset-4 transition hover:opacity-70"
-      >
-        {label}
-      </button>
+      <ResendButton label={label} variant={variant} />
     </form>
+  );
+}
+
+function ResendButton({
+  label,
+  variant,
+}: {
+  label: string;
+  variant: "primary" | "secondary";
+}) {
+  const { pending } = useFormStatus();
+
+  return (
+    <button
+      type="submit"
+      disabled={pending}
+      aria-disabled={pending}
+      className={
+        variant === "primary"
+          ? "inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-xl bg-[#2864ff] px-4 text-sm font-black text-white shadow-[0_10px_24px_rgba(40,100,255,0.2)] transition hover:bg-[#1f55e5] focus-visible:ring-4 focus-visible:ring-blue-200 disabled:cursor-wait disabled:opacity-70"
+          : "inline-flex min-h-11 items-center gap-2 rounded-xl border border-current/20 bg-white/70 px-4 text-sm font-extrabold text-current transition hover:bg-white focus-visible:ring-4 focus-visible:ring-current/10 disabled:cursor-wait disabled:opacity-70"
+      }
+    >
+      {pending ? (
+        <LoaderCircle
+          size={17}
+          className="animate-spin"
+          aria-hidden="true"
+        />
+      ) : (
+        <MailCheck size={17} aria-hidden="true" />
+      )}
+      {pending ? `${label}…` : label}
+    </button>
   );
 }
 
@@ -764,14 +942,11 @@ function SignedInPanel({
 
 const ERROR_FIELDS: Record<string, string> = {
   invalid: "credentials",
-  unverified: "email",
   email: "email",
   name: "name",
   password: "password",
   "password-match": "confirmPassword",
   terms: "terms",
-  "account-exists": "email",
-  "email-delivery": "email",
 };
 
 const AUTH_COPY = {
@@ -794,9 +969,22 @@ const AUTH_COPY = {
     loginButton: "Влез в профила си",
     signupButton: "Създай профил",
     problemTitle: "Не успяхме да продължим",
+    serviceUnavailableTitle: "Профилите временно са недостъпни",
+    serviceUnavailableSignup:
+      "Не успяхме да обработим регистрацията. Данните за вход не бяха запазени в браузъра — изчакай малко и опитай отново.",
+    serviceUnavailableLogin:
+      "Не успяхме да проверим данните за вход. Паролата ти не беше запазена — изчакай малко и опитай отново.",
+    tryAgain: "Опитай отново",
+    browseEvents: "Разгледай събитията",
+    goToLogin: "Към входа",
     verificationSentTitle: "Провери входящата си поща",
     verificationSentText:
       "Изпратихме линк за потвърждение на",
+    verificationDelayedTitle: "Профилът е създаден",
+    verificationDelayedText:
+      "Не успяхме да доставим имейла за потвърждение до",
+    noNeedToRegister:
+      "Не е нужно да се регистрираш отново. Изпрати нов линк от бутона по-долу.",
     localDeliveryTitle: "Имейл не е изпратен",
     localDeliveryText:
       "Resend не е конфигуриран в този локален проект. Използвай действието по-долу, за да продължиш директно към потвърждението.",
@@ -839,6 +1027,8 @@ const AUTH_COPY = {
         "Направени са твърде много опити. Изчакай няколко минути и опитай отново.",
       "email-delivery":
         "Не успяхме да изпратим имейла за потвърждение. Опитай отново след малко.",
+      "service-unavailable":
+        "Профилите временно са недостъпни. Опитай отново след малко.",
       generic: "Възникна неочаквана грешка. Опитай отново.",
     },
   },
@@ -861,8 +1051,21 @@ const AUTH_COPY = {
     loginButton: "Sign in to your account",
     signupButton: "Create account",
     problemTitle: "We could not continue",
+    serviceUnavailableTitle: "Account access is temporarily unavailable",
+    serviceUnavailableSignup:
+      "We could not process this registration. Your sign-in details were not saved in the browser—wait a moment and try again.",
+    serviceUnavailableLogin:
+      "We could not check your sign-in details. Your password was not saved—wait a moment and try again.",
+    tryAgain: "Try again",
+    browseEvents: "Browse events",
+    goToLogin: "Go to sign in",
     verificationSentTitle: "Check your inbox",
     verificationSentText: "We sent a verification link to",
+    verificationDelayedTitle: "Your account was created",
+    verificationDelayedText:
+      "We could not deliver the verification email to",
+    noNeedToRegister:
+      "You do not need to register again. Send a fresh link below.",
     localDeliveryTitle: "No email was sent",
     localDeliveryText:
       "Resend is not configured for this local project. Use the action below to continue directly to verification.",
@@ -904,6 +1107,8 @@ const AUTH_COPY = {
         "Too many attempts were made. Wait a few minutes and try again.",
       "email-delivery":
         "We could not send the verification email. Please try again shortly.",
+      "service-unavailable":
+        "Account access is temporarily unavailable. Please try again shortly.",
       generic: "Something unexpected happened. Please try again.",
     },
   },
