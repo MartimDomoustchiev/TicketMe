@@ -33,7 +33,7 @@ import {
   listRelatedCatalogEvents,
 } from "@/lib/catalog";
 import { getLocale, localizeHref } from "@/lib/i18n";
-import { getAvailability } from "@/lib/store";
+import { getPublicAvailability } from "@/lib/public-availability";
 
 export const dynamic = "force-dynamic";
 
@@ -77,8 +77,10 @@ export default async function EventPage({ params }: EventPageProps) {
 
   const internalSale = isInternallySoldEvent(event);
   const [availability, buyerSession, locale, relatedEvents] = await Promise.all([
-    internalSale ? getAvailability(event.id) : Promise.resolve(null),
-    getBuyerSession(),
+    internalSale
+      ? getPublicAvailability(event.id)
+      : Promise.resolve(null),
+    getBuyerSession().catch(() => null),
     getLocale(),
     listRelatedCatalogEvents(event),
   ]);
@@ -106,21 +108,21 @@ export default async function EventPage({ params }: EventPageProps) {
         addressCountry: "BG",
       },
     },
-    ...(internalSale && availability
-      ? {
-          offers: {
-            "@type": "AggregateOffer",
-            priceCurrency: event.currency,
-            lowPrice: event.priceFrom,
-            availability:
-              availability.totalRemaining > 0
-                ? "https://schema.org/InStock"
-                : "https://schema.org/SoldOut",
-          },
-        }
-      : {
-          url: event.sourceUrl,
-        }),
+    ...(internalSale
+      ? availability
+        ? {
+            offers: {
+              "@type": "AggregateOffer",
+              priceCurrency: event.currency,
+              lowPrice: event.priceFrom,
+              availability:
+                availability.totalRemaining > 0
+                  ? "https://schema.org/InStock"
+                  : "https://schema.org/SoldOut",
+            },
+          }
+        : {}
+      : { url: event.sourceUrl }),
   };
 
   return (
@@ -237,21 +239,33 @@ export default async function EventPage({ params }: EventPageProps) {
                 {internalSale ? copy.availability : copy.source}
               </span>
               <span className="font-black text-emerald-700">
-                {internalSale && availability
-                  ? availability.totalRemaining > 0
-                    ? copy.ticketsAvailable(availability.totalRemaining)
-                    : copy.soldOut
+                {internalSale
+                  ? availability
+                    ? availability.totalRemaining > 0
+                      ? copy.ticketsAvailable(availability.totalRemaining)
+                      : copy.soldOut
+                    : copy.availabilityUnavailable
                   : event.sourceName}
               </span>
             </p>
             <a
-              href={internalSale ? "#tickets" : event.sourceUrl}
+              href={
+                internalSale
+                  ? availability
+                    ? "#tickets"
+                    : localizeHref(locale, "/events")
+                  : event.sourceUrl
+              }
               target={internalSale ? undefined : "_blank"}
               rel={internalSale ? undefined : "noreferrer"}
               className="mt-5 inline-flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-[#2457ff] px-5 font-black text-white transition hover:bg-blue-700 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-blue-200"
             >
               <Ticket size={18} aria-hidden="true" />
-              {internalSale ? copy.chooseTickets : copy.openOfficialPage}
+              {internalSale
+                ? availability
+                  ? copy.chooseTickets
+                  : copy.backToEvents
+                : copy.openOfficialPage}
             </a>
             <p className="mt-4 flex items-center justify-center gap-2 text-xs font-bold text-slate-500">
               <ShieldCheck size={15} className="text-emerald-600" aria-hidden="true" />
@@ -329,16 +343,39 @@ export default async function EventPage({ params }: EventPageProps) {
         </div>
       </section>
 
-      {internalSale && availability ? (
+      {internalSale ? (
         <section className="border-y border-slate-200 bg-white px-4 py-12 sm:py-16">
-          <div className="mx-auto max-w-7xl">
-            <TicketDesk
-              event={event}
-              initialAvailability={availability}
-              initialSession={buyerSession}
-              locale={locale}
-            />
-          </div>
+          {availability ? (
+            <div className="mx-auto max-w-7xl">
+              <TicketDesk
+                event={event}
+                initialAvailability={availability}
+                initialSession={buyerSession}
+                locale={locale}
+              />
+            </div>
+          ) : (
+            <div className="mx-auto max-w-3xl rounded-3xl border border-amber-200 bg-amber-50 p-6 text-center sm:p-8">
+              <ShieldCheck
+                className="mx-auto text-amber-700"
+                size={32}
+                aria-hidden="true"
+              />
+              <h2 className="mt-4 text-2xl font-black">
+                {copy.salesPausedTitle}
+              </h2>
+              <p className="mx-auto mt-3 max-w-2xl leading-7 text-slate-600">
+                {copy.salesPausedDescription}
+              </p>
+              <Link
+                href={localizeHref(locale, "/events")}
+                className="mt-6 inline-flex h-12 items-center justify-center gap-2 rounded-xl bg-[#10172a] px-6 font-black text-white transition hover:bg-[#2457ff]"
+              >
+                {copy.backToEvents}
+                <ChevronRight size={18} aria-hidden="true" />
+              </Link>
+            </div>
+          )}
         </section>
       ) : (
         <section className="border-y border-slate-200 bg-white px-4 py-12 sm:py-16">
@@ -463,13 +500,18 @@ const EVENT_COPY = {
     source: "Източник",
     ticketsAvailable: (count: number) => `${count} билета`,
     soldOut: "Изчерпано",
+    availabilityUnavailable: "Временно недостъпна",
     chooseTickets: "Избери билети",
+    backToEvents: "Разгледай събитията",
     openOfficialPage: "Отвори източника",
     secureVerified: "Сигурна заявка и потвърден имейл",
     sourceVerified: "Данните са свързани с оригиналния източник",
     externalEventTitle: "Цени и билети от оригиналния източник",
     externalEventDescription:
       "TicketForge показва това събитие за откриване и не продава билети за него. Проверете актуалните цени, наличност и условия в официалния източник.",
+    salesPausedTitle: "Продажбата е временно поставена на пауза",
+    salesPausedDescription:
+      "Пазим системата честна и не приемаме поръчки, докато не можем да потвърдим наличността. Опитай отново след малко.",
     securePurchase: "Защитена покупка",
     securePurchaseText: "Надеждна обработка на всяка заявка",
     fairQueue: "Честна опашка",
@@ -498,13 +540,18 @@ const EVENT_COPY = {
     ticketsAvailable: (count: number) =>
       `${count} ${count === 1 ? "ticket" : "tickets"}`,
     soldOut: "Sold out",
+    availabilityUnavailable: "Temporarily unavailable",
     chooseTickets: "Choose tickets",
+    backToEvents: "Browse events",
     openOfficialPage: "Open event source",
     secureVerified: "Secure booking and verified email",
     sourceVerified: "Details are linked to the original source",
     externalEventTitle: "Prices and tickets from the original source",
     externalEventDescription:
       "TicketForge lists this event for discovery and does not sell its tickets. Check current prices, availability and conditions on the official source.",
+    salesPausedTitle: "Ticket sales are temporarily paused",
+    salesPausedDescription:
+      "To keep allocation fair, we do not accept orders while live inventory cannot be confirmed. Please try again shortly.",
     securePurchase: "Secure booking",
     securePurchaseText: "Reliable handling of every request",
     fairQueue: "Fair queue",

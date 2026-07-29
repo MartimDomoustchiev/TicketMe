@@ -1,11 +1,10 @@
 import type { MetadataRoute } from "next";
 import { listCatalogEvents } from "@/lib/catalog";
 import { SUPPORTED_LOCALES } from "@/lib/i18n-config";
+import { getBaseUrl } from "@/lib/site";
 
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
-  const baseUrl =
-    process.env.NEXT_PUBLIC_APP_URL?.replace(/\/$/, "") ??
-    "http://localhost:3000";
+  const baseUrl = getBaseUrl();
   const generatedAt = new Date();
   const catalogEvents = await listCatalogEvents();
 

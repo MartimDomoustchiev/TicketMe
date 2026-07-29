@@ -3,6 +3,7 @@ import test from "node:test";
 import { enqueuePurchase } from "../src/lib/queue";
 import {
   isPublicHttpsBaseUrl,
+  resolvePublicBaseUrl,
   safeReturnPath,
 } from "../src/lib/site";
 
@@ -31,6 +32,29 @@ test("production base URLs require a public HTTPS origin", () => {
     false,
   );
   assert.equal(isPublicHttpsBaseUrl("not a URL"), false);
+});
+
+test("public base URL falls back to Vercel production domains", () => {
+  assert.equal(
+    resolvePublicBaseUrl({
+      NEXT_PUBLIC_APP_URL: "http://localhost:3000",
+      VERCEL_PROJECT_PRODUCTION_URL: "www.ticketme.store",
+    }),
+    "https://www.ticketme.store",
+  );
+  assert.equal(
+    resolvePublicBaseUrl({
+      VERCEL_URL: "ticket-me-preview.vercel.app",
+    }),
+    "https://ticket-me-preview.vercel.app",
+  );
+  assert.equal(
+    resolvePublicBaseUrl({
+      NEXT_PUBLIC_APP_URL: "https://ticketme.store/",
+      VERCEL_PROJECT_PRODUCTION_URL: "www.ticketme.store",
+    }),
+    "https://ticketme.store",
+  );
 });
 
 test("the development queue executes a lane in FIFO order", async () => {

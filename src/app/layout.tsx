@@ -5,6 +5,7 @@ import "@fontsource/noto-sans/700.css";
 import "@fontsource/noto-sans/800.css";
 import "./globals.css";
 import { getLocale, getPublicUrl, switchLocaleInHref } from "@/lib/i18n";
+import { getBaseUrl } from "@/lib/site";
 
 export async function generateMetadata(): Promise<Metadata> {
   const [locale, publicUrl] = await Promise.all([
@@ -21,9 +22,7 @@ export async function generateMetadata(): Promise<Metadata> {
     : "Открий концерти, фестивали, театър и преживявания в България. Сигурни електронни билети и наличност в реално време.";
 
   return {
-    metadataBase: new URL(
-      process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000",
-    ),
+    metadataBase: new URL(getBaseUrl()),
     title: {
       default: title,
       template: "%s | TicketForge",

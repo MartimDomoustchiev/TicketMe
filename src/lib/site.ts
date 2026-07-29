@@ -1,11 +1,53 @@
+type PublicUrlEnvironment = {
+  NEXT_PUBLIC_APP_URL?: string;
+  NODE_ENV?: string;
+  VERCEL_PROJECT_PRODUCTION_URL?: string;
+  VERCEL_URL?: string;
+};
+
+function normalizePublicBaseUrl(value: string | undefined): string | null {
+  const trimmed = value?.trim();
+  if (!trimmed) return null;
+
+  const candidate = trimmed.includes("://")
+    ? trimmed
+    : `https://${trimmed}`;
+  if (!isPublicHttpsBaseUrl(candidate)) return null;
+
+  return new URL(candidate).origin;
+}
+
+export function resolvePublicBaseUrl(
+  env: PublicUrlEnvironment = process.env,
+): string | null {
+  return (
+    normalizePublicBaseUrl(env.NEXT_PUBLIC_APP_URL) ??
+    normalizePublicBaseUrl(env.VERCEL_PROJECT_PRODUCTION_URL) ??
+    normalizePublicBaseUrl(env.VERCEL_URL)
+  );
+}
+
 export function getBaseUrl(request?: Request): string {
-  if (process.env.NEXT_PUBLIC_APP_URL) {
-    return process.env.NEXT_PUBLIC_APP_URL.replace(/\/$/, "");
+  const publicBaseUrl = resolvePublicBaseUrl();
+  if (publicBaseUrl) {
+    return publicBaseUrl;
   }
 
   if (request) {
     const url = new URL(request.url);
-    return url.origin;
+    if (
+      process.env.NODE_ENV !== "production" ||
+      isPublicHttpsBaseUrl(url.origin)
+    ) {
+      return url.origin;
+    }
+  }
+
+  if (
+    process.env.NODE_ENV !== "production" &&
+    process.env.NEXT_PUBLIC_APP_URL
+  ) {
+    return process.env.NEXT_PUBLIC_APP_URL.replace(/\/$/, "");
   }
 
   return "http://localhost:3000";

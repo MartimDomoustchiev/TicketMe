@@ -3,7 +3,7 @@ import {
   isDatabaseConfigured,
 } from "@/lib/database";
 import { isEmailReadyForArbitraryRecipients } from "@/lib/email";
-import { isPublicHttpsBaseUrl } from "@/lib/site";
+import { resolvePublicBaseUrl } from "@/lib/site";
 import { stripeMode } from "@/lib/stripe";
 
 export const runtime = "nodejs";
@@ -23,8 +23,7 @@ export async function GET() {
           process.env.S3_ACCESS_KEY_ID &&
           process.env.S3_SECRET_ACCESS_KEY,
       ) || development,
-    publicUrl:
-      isPublicHttpsBaseUrl(process.env.NEXT_PUBLIC_APP_URL) || development,
+    publicUrl: Boolean(resolvePublicBaseUrl()) || development,
     stripe: stripeMode() === "test" || development,
     stripeWebhook:
       Boolean(process.env.STRIPE_WEBHOOK_SECRET?.startsWith("whsec_")) ||

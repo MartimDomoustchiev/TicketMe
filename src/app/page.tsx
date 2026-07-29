@@ -1,6 +1,7 @@
 import {
   ArrowRight,
   CalendarDays,
+  CircleAlert,
   MailCheck,
   MapPin,
   Radio,
@@ -31,13 +32,13 @@ import {
 } from "@/lib/event";
 import { listCatalogEvents } from "@/lib/catalog";
 import { getLocale, localizeHref } from "@/lib/i18n";
-import { getAvailability } from "@/lib/store";
+import { getPublicAvailability } from "@/lib/public-availability";
 
 export const dynamic = "force-dynamic";
 
 export default async function Home() {
   const [availability, locale, catalogEvents] = await Promise.all([
-    getAvailability(EVENT.id),
+    getPublicAvailability(EVENT.id),
     getLocale(),
     listCatalogEvents(),
   ]);
@@ -122,10 +123,14 @@ export default async function Home() {
 
             <div className="mt-8 flex flex-wrap items-center gap-3">
               <Link
-                href={`${eventHref(EVENT, locale)}#tickets`}
+                href={
+                  availability
+                    ? `${eventHref(EVENT, locale)}#tickets`
+                    : eventHref(EVENT, locale)
+                }
                 className="inline-flex h-13 items-center justify-center gap-2 rounded-xl bg-[#2457ff] px-6 font-black text-white shadow-[0_14px_35px_rgba(36,87,255,0.35)] transition hover:-translate-y-0.5 hover:bg-blue-700 focus-visible:ring-4 focus-visible:ring-blue-300"
               >
-                {copy.chooseTickets}
+                {availability ? copy.chooseTickets : copy.moreInformation}
                 <ArrowRight size={19} aria-hidden="true" />
               </Link>
               <Link
@@ -180,13 +185,33 @@ export default async function Home() {
               ))}
             </div>
 
-            <div className="mt-5 rounded-2xl bg-emerald-50 p-4">
-              <p className="flex items-center gap-2 text-sm font-black text-emerald-900">
-                <Radio size={16} aria-hidden="true" />
-                {copy.availableTickets(availability.totalRemaining)}
+            <div
+              className={`mt-5 rounded-2xl p-4 ${
+                availability ? "bg-emerald-50" : "bg-amber-50"
+              }`}
+            >
+              <p
+                className={`flex items-center gap-2 text-sm font-black ${
+                  availability ? "text-emerald-900" : "text-amber-950"
+                }`}
+              >
+                {availability ? (
+                  <Radio size={16} aria-hidden="true" />
+                ) : (
+                  <CircleAlert size={16} aria-hidden="true" />
+                )}
+                {availability
+                  ? copy.availableTickets(availability.totalRemaining)
+                  : copy.availabilityUnavailable}
               </p>
-              <p className="mt-1 text-xs leading-5 text-emerald-800">
-                {copy.liveAvailability}
+              <p
+                className={`mt-1 text-xs leading-5 ${
+                  availability ? "text-emerald-800" : "text-amber-800"
+                }`}
+              >
+                {availability
+                  ? copy.liveAvailability
+                  : copy.availabilityUnavailableText}
               </p>
             </div>
           </aside>
@@ -428,6 +453,9 @@ const HOME_COPY = {
     availableTickets: (count: number) => `${count} билета са налични`,
     liveAvailability:
       "Наличността се актуализира в реално време при избор на билет.",
+    availabilityUnavailable: "Проверяваме наличността",
+    availabilityUnavailableText:
+      "Разглеждането работи, но продажбата е временно поставена на пауза.",
     searchPlaceholder: "Търси събитие, артист или място",
     findEvent: "Намери събитие",
     selectedForYou: "Избрано за теб",
@@ -468,6 +496,9 @@ const HOME_COPY = {
       `${count} ${count === 1 ? "ticket is" : "tickets are"} available`,
     liveAvailability:
       "Availability updates in real time while customers choose tickets.",
+    availabilityUnavailable: "Checking live availability",
+    availabilityUnavailableText:
+      "Browsing remains available while ticket sales are temporarily paused.",
     searchPlaceholder: "Search by event, artist or venue",
     findEvent: "Find an event",
     selectedForYou: "Selected for you",
