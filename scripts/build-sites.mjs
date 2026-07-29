@@ -1,14 +1,16 @@
 import {
-  copyFileSync,
   existsSync,
   mkdtempSync,
+  readFileSync,
   rmSync,
   statSync,
+  writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
+import { minify } from "terser";
 
 const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const openNextCli = join(
@@ -28,7 +30,7 @@ const wranglerCli = join(
   "wrangler.js",
 );
 const workerPath = join(projectRoot, ".open-next", "worker.js");
-const sitesWorkerMaxBytes = 9_750_000;
+const sitesWorkerMaxBytes = 9_000_000;
 
 function runCli(cliPath, args) {
   const result = spawnSync(process.execPath, [cliPath, ...args], {
@@ -67,7 +69,22 @@ try {
     throw new Error("Wrangler did not produce the Sites worker bundle.");
   }
 
-  copyFileSync(bundledWorkerPath, workerPath);
+  const compressed = await minify(
+    readFileSync(bundledWorkerPath, "utf8"),
+    {
+      compress: { passes: 2 },
+      ecma: 2022,
+      format: { comments: false },
+      mangle: true,
+      module: true,
+    },
+  );
+
+  if (!compressed.code) {
+    throw new Error("Terser did not produce the Sites worker bundle.");
+  }
+
+  writeFileSync(workerPath, compressed.code);
   const workerBytes = statSync(workerPath).size;
 
   if (workerBytes > sitesWorkerMaxBytes) {
