@@ -1,0 +1,71 @@
+import type Stripe from "stripe";
+import type { CatalogEvent, TicketType } from "@/lib/event";
+
+type BuildStripeCheckoutParamsInput = {
+  baseUrl: string;
+  event: CatalogEvent;
+  expiresAtUnix: number;
+  locale: "bg" | "en";
+  reservationId: string;
+  ticketType: TicketType;
+  buyerEmail: string;
+};
+
+export function buildStripeCheckoutSessionParams(
+  input: BuildStripeCheckoutParamsInput,
+): Stripe.Checkout.SessionCreateParams {
+  if (input.event.currency !== input.ticketType.currency) {
+    throw new Error("CHECKOUT_CURRENCY_MISMATCH");
+  }
+
+  return {
+    mode: "payment",
+    branding_settings: {
+      display_name: "TicketForge",
+      background_color: "#ffffff",
+      button_color: "#1d4ed8",
+      border_style: "rounded",
+      font_family: "inter",
+    },
+    // Apple Pay and Google Pay are card wallets in Stripe Checkout. Restricting
+    // the session to card rails keeps both wallets eligible while excluding
+    // delayed methods that could settle after the ticket reservation expires.
+    payment_method_types: ["card"],
+    client_reference_id: input.reservationId,
+    customer_email: input.buyerEmail,
+    locale: input.locale,
+    expires_at: input.expiresAtUnix,
+    success_url: `${input.baseUrl}/${input.locale}/checkout/success?session_id={CHECKOUT_SESSION_ID}`,
+    cancel_url: `${input.baseUrl}/${input.locale}/checkout/cancelled?reservation_id=${encodeURIComponent(input.reservationId)}&event=${encodeURIComponent(input.event.slug)}`,
+    line_items: [
+      {
+        quantity: 1,
+        price_data: {
+          currency: input.ticketType.currency.toLowerCase(),
+          unit_amount: Math.round(input.ticketType.price * 100),
+          product_data: {
+            name: input.event.title,
+            description: `${input.ticketType.label} · ${input.event.venue}`,
+            images: [input.event.image],
+            metadata: {
+              eventId: input.event.id,
+              ticketType: input.ticketType.id,
+            },
+          },
+        },
+      },
+    ],
+    metadata: {
+      reservationId: input.reservationId,
+      eventId: input.event.id,
+      ticketType: input.ticketType.id,
+      locale: input.locale,
+    },
+    payment_intent_data: {
+      metadata: {
+        reservationId: input.reservationId,
+        eventId: input.event.id,
+      },
+    },
+  };
+}

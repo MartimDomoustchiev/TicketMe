@@ -1,0 +1,330 @@
+import { readFileSync } from "node:fs";
+import { resolve as resolvePath } from "node:path";
+import type { ConnectionOptions } from "node:tls";
+import postgres from "postgres";
+
+export type SqlClient = ReturnType<typeof postgres>;
+
+type DatabaseEnvironment = {
+  DATABASE_AUTO_MIGRATE?: string;
+  DATABASE_HOST?: string;
+  DATABASE_NAME?: string;
+  DATABASE_PASSWORD?: string;
+  DATABASE_POOL_MAX?: string;
+  DATABASE_PORT?: string;
+  DATABASE_SSL_CA?: string;
+  DATABASE_SSL_CA_BASE64?: string;
+  DATABASE_SSL_CA_PATH?: string;
+  DATABASE_URL?: string;
+  DATABASE_USER?: string;
+  MIGRATION_DATABASE_URL?: string;
+  NODE_ENV?: string;
+};
+
+type DatabaseSsl =
+  | "allow"
+  | "prefer"
+  | "require"
+  | "verify-full"
+  | boolean
+  | ConnectionOptions;
+
+export type ResolvedDatabaseConnection = {
+  database: string;
+  hostname: string;
+  poolMax: number;
+  ssl: DatabaseSsl | undefined;
+  url: string;
+  username: string;
+};
+
+const RDS_HOST_SUFFIX = ".rds.amazonaws.com";
+
+declare global {
+  var __ticketForgeDatabaseSql: SqlClient | undefined;
+}
+
+export function isCloudflareWorkerRuntime(): boolean {
+  return (
+    typeof (globalThis as typeof globalThis & { Cloudflare?: unknown })
+      .Cloudflare !== "undefined"
+  );
+}
+
+function configured(value: string | undefined): boolean {
+  return Boolean(value?.trim());
+}
+
+function buildDatabaseUrl(env: DatabaseEnvironment): string | null {
+  const explicitUrl = env.DATABASE_URL?.trim();
+  if (explicitUrl) {
+    return explicitUrl;
+  }
+
+  const host = env.DATABASE_HOST?.trim();
+  const database = env.DATABASE_NAME?.trim();
+  const username = env.DATABASE_USER?.trim();
+  const password = env.DATABASE_PASSWORD;
+
+  if (!host || !database || !username || !configured(password)) {
+    return null;
+  }
+
+  const url = new URL("postgresql://localhost");
+  url.hostname = host;
+  url.port = env.DATABASE_PORT?.trim() || "5432";
+  url.username = username;
+  url.password = password ?? "";
+  url.pathname = `/${database}`;
+  return url.toString();
+}
+
+export function isDatabaseConfigured(
+  env: DatabaseEnvironment = process.env,
+): boolean {
+  return buildDatabaseUrl(env) !== null;
+}
+
+function normalizePem(value: string): string {
+  return value.includes("\\n") ? value.replaceAll("\\n", "\n") : value;
+}
+
+function readCertificateAuthority(
+  env: DatabaseEnvironment,
+  rootCertificateHint: string | null,
+): string | null {
+  const inline = env.DATABASE_SSL_CA?.trim();
+  const base64 = env.DATABASE_SSL_CA_BASE64?.trim();
+  const configuredPath =
+    env.DATABASE_SSL_CA_PATH?.trim() ||
+    (rootCertificateHint && rootCertificateHint !== "system"
+      ? rootCertificateHint
+      : "");
+  const sources = [inline, base64, configuredPath].filter(Boolean);
+
+  if (sources.length > 1) {
+    throw new Error(
+      "Configure only one of DATABASE_SSL_CA, DATABASE_SSL_CA_BASE64, DATABASE_SSL_CA_PATH, or sslrootcert.",
+    );
+  }
+
+  let certificate: string | null = null;
+  if (inline) {
+    certificate = normalizePem(inline);
+  } else if (base64) {
+    certificate = Buffer.from(base64, "base64").toString("utf8");
+  } else if (configuredPath) {
+    try {
+      certificate = readFileSync(resolvePath(configuredPath), "utf8");
+    } catch {
+      throw new Error(
+        "The configured PostgreSQL certificate authority file could not be read.",
+      );
+    }
+  }
+
+  if (
+    certificate &&
+    (!certificate.includes("-----BEGIN CERTIFICATE-----") ||
+      !certificate.includes("-----END CERTIFICATE-----"))
+  ) {
+    throw new Error(
+      "The configured PostgreSQL certificate authority is not a valid PEM bundle.",
+    );
+  }
+
+  return certificate;
+}
+
+function resolveSsl(
+  env: DatabaseEnvironment,
+  url: URL,
+  sslMode: string | null,
+  rootCertificateHint: string | null,
+): DatabaseSsl | undefined {
+  const rds = url.hostname.endsWith(RDS_HOST_SUFFIX);
+  if (rds && sslMode === "disable") {
+    throw new Error("TLS cannot be disabled for an AWS RDS connection.");
+  }
+
+  const certificate = readCertificateAuthority(env, rootCertificateHint);
+  if (certificate) {
+    return {
+      ca: certificate,
+      minVersion: "TLSv1.2",
+      rejectUnauthorized: true,
+      servername: url.hostname,
+    };
+  }
+
+  if (rds) {
+    throw new Error(
+      "AWS RDS requires DATABASE_SSL_CA_PATH, DATABASE_SSL_CA_BASE64, or DATABASE_SSL_CA.",
+    );
+  }
+
+  switch (sslMode) {
+    case null:
+    case "disable":
+      return undefined;
+    case "verify-full":
+      return "verify-full";
+    case "require":
+      return "require";
+    case "allow":
+      return "allow";
+    case "prefer":
+      return "prefer";
+    default:
+      throw new Error("Unsupported PostgreSQL sslmode.");
+  }
+}
+
+function poolMax(env: DatabaseEnvironment): number {
+  const parsed = Number.parseInt(env.DATABASE_POOL_MAX?.trim() || "5", 10);
+  if (!Number.isInteger(parsed) || parsed < 1 || parsed > 20) {
+    throw new Error("DATABASE_POOL_MAX must be an integer from 1 to 20.");
+  }
+  return parsed;
+}
+
+export function resolveDatabaseConnection(
+  env: DatabaseEnvironment = process.env,
+): ResolvedDatabaseConnection {
+  const rawUrl = buildDatabaseUrl(env);
+  if (!rawUrl) {
+    throw new Error(
+      "Configure DATABASE_URL or all DATABASE_HOST/DATABASE_NAME/DATABASE_USER/DATABASE_PASSWORD fields.",
+    );
+  }
+
+  let url: URL;
+  try {
+    url = new URL(rawUrl);
+  } catch {
+    throw new Error("DATABASE_URL is not a valid PostgreSQL URL.");
+  }
+
+  if (url.protocol !== "postgres:" && url.protocol !== "postgresql:") {
+    throw new Error("DATABASE_URL must use the postgres or postgresql scheme.");
+  }
+  if (!url.hostname || !url.pathname.slice(1) || !url.username) {
+    throw new Error("The PostgreSQL host, database, and user are required.");
+  }
+
+  const sslMode = url.searchParams.get("sslmode");
+  const rootCertificateHint = url.searchParams.get("sslrootcert");
+  const ssl = resolveSsl(env, url, sslMode, rootCertificateHint);
+
+  // Postgres.js doesn't interpret an sslrootcert path itself and would send it
+  // as a PostgreSQL startup parameter. The CA has already been loaded above.
+  url.searchParams.delete("sslrootcert");
+
+  return {
+    database: decodeURIComponent(url.pathname.slice(1)),
+    hostname: url.hostname,
+    poolMax: poolMax(env),
+    ssl,
+    url: url.toString(),
+    username: decodeURIComponent(url.username),
+  };
+}
+
+export function createDatabaseClient(
+  env: DatabaseEnvironment = process.env,
+  options: { max?: number; requestScoped?: boolean } = {},
+): SqlClient {
+  const connection = resolveDatabaseConnection(env);
+  const requestScoped =
+    options.requestScoped ?? isCloudflareWorkerRuntime();
+
+  return postgres(connection.url, {
+    connect_timeout: 10,
+    // Cloudflare does not allow a TCP socket created by one request to be
+    // reused by another request. A short lifetime releases a request-local
+    // connection promptly; Hyperdrive provides pooling outside the Worker.
+    idle_timeout: requestScoped ? 1 : 20,
+    max: requestScoped ? 1 : (options.max ?? connection.poolMax),
+    prepare: false,
+    ...(requestScoped ? { max_lifetime: 1 } : {}),
+    ...(connection.ssl === undefined ? {} : { ssl: connection.ssl }),
+  });
+}
+
+export function databaseSql(): SqlClient {
+  if (isCloudflareWorkerRuntime()) {
+    // Never retain Postgres.js clients in isolate-global state. Its TCP socket
+    // belongs to the active Worker request and cannot be used by a later one.
+    return createDatabaseClient(process.env, {
+      max: 1,
+      requestScoped: true,
+    });
+  }
+
+  globalThis.__ticketForgeDatabaseSql ??= createDatabaseClient();
+  return globalThis.__ticketForgeDatabaseSql;
+}
+
+export function databaseAutoMigrateEnabled(
+  env: DatabaseEnvironment = process.env,
+): boolean {
+  const enabled = env.DATABASE_AUTO_MIGRATE?.trim().toLowerCase() === "true";
+  if (enabled && env.NODE_ENV === "production") {
+    throw new Error(
+      "DATABASE_AUTO_MIGRATE cannot be enabled in production; run npm run db:migrate during deployment.",
+    );
+  }
+  return enabled;
+}
+
+export async function databaseSchemaStatus(
+  client: SqlClient = databaseSql(),
+): Promise<{ ready: boolean; tls: boolean }> {
+  const rows = await client`
+    SELECT
+      to_regclass('public.event_inventory') IS NOT NULL AS event_inventory,
+      to_regclass('public.verification_tokens') IS NOT NULL AS verification_tokens,
+      to_regclass('public.tickets') IS NOT NULL AS tickets,
+      to_regclass('public.purchase_queue') IS NOT NULL AS purchase_queue,
+      to_regclass('public.checkout_reservations') IS NOT NULL AS checkout_reservations,
+      to_regclass('public.audit_log') IS NOT NULL AS audit_log,
+      to_regclass('public.users') IS NOT NULL AS users,
+      to_regclass('public.auth_sessions') IS NOT NULL AS auth_sessions,
+      to_regclass('public.email_verification_tokens') IS NOT NULL AS email_verification_tokens,
+      to_regclass('public.catalog_events') IS NOT NULL AS catalog_events,
+      to_regclass('public.catalog_event_sources') IS NOT NULL AS catalog_event_sources,
+      to_regclass('public.event_discovery_runs') IS NOT NULL AS event_discovery_runs,
+      COALESCE(
+        (SELECT ssl FROM pg_stat_ssl WHERE pid = pg_backend_pid()),
+        FALSE
+      ) AS tls
+  `;
+  const row = rows[0];
+  const ready = Boolean(
+    row?.event_inventory &&
+      row.verification_tokens &&
+      row.tickets &&
+      row.purchase_queue &&
+      row.checkout_reservations &&
+      row.audit_log &&
+      row.users &&
+      row.auth_sessions &&
+      row.email_verification_tokens &&
+      row.catalog_events &&
+      row.catalog_event_sources &&
+      row.event_discovery_runs,
+  );
+
+  return { ready, tls: Boolean(row?.tls) };
+}
+
+export async function assertDatabaseSchema(
+  client: SqlClient = databaseSql(),
+): Promise<void> {
+  const status = await databaseSchemaStatus(client);
+  if (!status.ready) {
+    throw new Error(
+      "The PostgreSQL schema is not ready. Run npm run db:migrate.",
+    );
+  }
+}
