@@ -49,6 +49,7 @@ try {
   runCli(wranglerCli, [
     "deploy",
     "--dry-run",
+    "--minify",
     "--outdir",
     bundleDirectory,
   ]);
