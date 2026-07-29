@@ -723,6 +723,12 @@ PostgreSQL и object storage, browser E2E тестове за login/checkout/adm
 - **Resend** — verification и ticket email от верифициран TicketMe domain;
 - **AWS S3 или Cloudflare R2** — private PDF storage.
 
+`npm run build:sites` изгражда минимален 308 redirect към каноничния
+`https://www.ticketme.store`, като запазва path-а и query параметрите. Така
+private Sites release-ът не създава втори commerce origin със самостоятелни
+cookies, webhook-и и payment callbacks. За пълен Cloudflare/OpenNext bundle
+използвай `npm run build:cloudflare`.
+
 Стъпки:
 
 1. Свържи GitHub repository-то с Vercel и задай production branch.
