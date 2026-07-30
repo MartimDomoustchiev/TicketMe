@@ -27,8 +27,6 @@ export function buildStripeCheckoutSessionParams(
 
   return {
     mode: "payment",
-    ui_mode: "embedded_page",
-    redirect_on_completion: "never",
     branding_settings: {
       display_name: "TicketMe",
       background_color: "#ffffff",
@@ -44,6 +42,8 @@ export function buildStripeCheckoutSessionParams(
     customer_email: input.buyerEmail,
     locale: input.locale,
     expires_at: input.expiresAtUnix,
+    success_url: `${input.baseUrl}/${input.locale}/checkout/success?session_id={CHECKOUT_SESSION_ID}`,
+    cancel_url: `${input.baseUrl}/${input.locale}/checkout/cancelled?reservation_id=${encodeURIComponent(input.reservationId)}&event=${encodeURIComponent(input.event.slug)}`,
     line_items: [
       {
         quantity: 1,

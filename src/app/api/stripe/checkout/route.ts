@@ -14,13 +14,15 @@ import {
 } from "@/lib/store";
 import {
   getStripeClient,
-  isStripeEmbeddedTestConfigured,
+  isStripeConfigured,
   stripeMode,
 } from "@/lib/stripe";
 import { buildStripeCheckoutSessionParams } from "@/lib/stripe-checkout";
+import { reconcileStaleStripeCheckouts } from "@/lib/stripe-reconciliation";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+export const maxDuration = 30;
 
 type CheckoutBody = {
   eventId?: unknown;
@@ -90,7 +92,7 @@ export async function POST(request: Request) {
     return checkoutError(errorCopy.signIn, 401);
   }
 
-  if (!isStripeEmbeddedTestConfigured()) {
+  if (!isStripeConfigured()) {
     return checkoutError(errorCopy.unavailable, 503, { "Retry-After": "30" });
   }
 
@@ -118,6 +120,8 @@ export async function POST(request: Request) {
   let stripeSessionId: string | null = null;
 
   try {
+    await reconcileStaleStripeCheckouts(3);
+
     // Stripe allows a minimum 30-minute Checkout lifetime. Use 31 minutes so
     // clock and request latency cannot put expires_at below Stripe's minimum.
     // The local reservation keeps a short webhook-delivery grace period; the
@@ -142,13 +146,13 @@ export async function POST(request: Request) {
         ticketType,
         buyerEmail: session.email,
       }),
-      { idempotencyKey: `ticketme-embedded-checkout-${reservation.id}` },
+      { idempotencyKey: `ticketme-hosted-checkout-${reservation.id}` },
     );
 
     stripeSessionId = checkoutSession.id;
 
-    if (!checkoutSession.client_secret) {
-      throw new Error("STRIPE_CHECKOUT_CLIENT_SECRET_MISSING");
+    if (!checkoutSession.url) {
+      throw new Error("STRIPE_CHECKOUT_URL_MISSING");
     }
 
     await attachCheckoutSession({
@@ -157,9 +161,7 @@ export async function POST(request: Request) {
     });
 
     return Response.json({
-      clientSecret: checkoutSession.client_secret,
-      checkoutSessionId: checkoutSession.id,
-      reservationId: reservation.id,
+      checkoutUrl: checkoutSession.url,
       expiresAt: reservation.expiresAt,
       mode: stripeMode(),
     });

@@ -22,8 +22,6 @@
     "@aws-sdk/client-s3": "^3.1095.0",
     "@fontsource/noto-sans": "^5.3.0",
     "@pdf-lib/fontkit": "^1.1.1",
-    "@stripe/react-stripe-js": "^6.8.0",
-    "@stripe/stripe-js": "^9.12.1",
     "fast-xml-parser": "^5.10.1",
     "lucide-react": "^1.27.0",
     "next": "16.2.12",

@@ -14,6 +14,7 @@ import { MarketplaceHeader } from "@/components/marketplace/MarketplaceHeader";
 import { getBuyerSession } from "@/lib/auth";
 import { getLocale, localizeHref } from "@/lib/i18n";
 import { getBaseUrl } from "@/lib/site";
+import { stripeMode } from "@/lib/stripe";
 import {
   getCheckoutReservationBySession,
   getTicket,
@@ -22,6 +23,7 @@ import {
 import { fulfillStripeCheckoutSession } from "@/lib/stripe-fulfillment";
 
 export const dynamic = "force-dynamic";
+export const maxDuration = 30;
 
 export const metadata: Metadata = {
   title: "Payment confirmation",
@@ -107,6 +109,7 @@ export default async function CheckoutSuccessPage({
     searchParams,
   ]);
   const english = locale === "en";
+  const testMode = stripeMode() === "test";
   const sessionId =
     typeof query.session_id === "string" ? query.session_id : "";
   const state = buyer
@@ -141,8 +144,12 @@ export default async function CheckoutSuccessPage({
             <h1 className="mt-6 text-3xl font-black tracking-tight sm:text-4xl">
               {state.ticket
                 ? english
-                  ? "Payment confirmed"
-                  : "Плащането е потвърдено"
+                  ? testMode
+                    ? "Test payment confirmed"
+                    : "Payment confirmed"
+                  : testMode
+                    ? "Тестовото плащане е потвърдено"
+                    : "Плащането е потвърдено"
                 : english
                   ? "Confirming your payment"
                   : "Потвърждаваме плащането"}
@@ -151,8 +158,12 @@ export default async function CheckoutSuccessPage({
               {state.ticket
                 ? state.delivered
                   ? english
-                    ? "Your ticket is ready and has been sent to your verified email."
-                    : "Билетът е готов и е изпратен на потвърдения ти имейл."
+                    ? testMode
+                      ? "No real funds were charged. Your ticket is ready and has been sent to your verified email."
+                      : "Your ticket is ready and has been sent to your verified email."
+                    : testMode
+                      ? "Не са таксувани реални средства. Билетът е готов и е изпратен на потвърдения ти имейл."
+                      : "Билетът е готов и е изпратен на потвърдения ти имейл."
                   : english
                     ? "Your order is secured. We are preparing the PDF ticket and email now."
                     : "Поръчката е запазена. Подготвяме PDF билета и имейла."

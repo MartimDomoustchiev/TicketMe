@@ -29,7 +29,7 @@ const INTERNAL_EVENT: CatalogEvent = {
   ticketTypes: [TICKET_TYPE],
 };
 
-test("embedded Checkout stays on-site and enables immediate card wallets", () => {
+test("hosted Checkout returns safely and enables eligible card wallets", () => {
   const ticketType = TICKET_TYPE;
   const params = buildStripeCheckoutSessionParams({
     baseUrl: "https://tickets.example",
@@ -42,10 +42,16 @@ test("embedded Checkout stays on-site and enables immediate card wallets", () =>
   });
 
   assert.equal(params.mode, "payment");
-  assert.equal(params.ui_mode, "embedded_page");
-  assert.equal(params.redirect_on_completion, "never");
-  assert.equal(params.success_url, undefined);
-  assert.equal(params.cancel_url, undefined);
+  assert.equal(params.ui_mode, undefined);
+  assert.equal(params.redirect_on_completion, undefined);
+  assert.equal(
+    params.success_url,
+    "https://tickets.example/en/checkout/success?session_id={CHECKOUT_SESSION_ID}",
+  );
+  assert.equal(
+    params.cancel_url,
+    "https://tickets.example/en/checkout/cancelled?reservation_id=RSV-WALLETTEST0001&event=organizer-owned-event",
+  );
   assert.equal(params.return_url, undefined);
   assert.deepEqual(params.payment_method_types, ["card"]);
   assert.deepEqual(params.branding_settings, {

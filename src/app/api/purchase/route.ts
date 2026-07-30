@@ -14,7 +14,7 @@ export async function POST(request: Request) {
   return Response.json(
     {
       error:
-        "Direct demo ticket issuing has been removed. Continue with the embedded Stripe test checkout.",
+        "Direct ticket issuing is disabled. Continue with secure Stripe Checkout.",
     },
     { status: 410 },
   );

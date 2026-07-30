@@ -1309,6 +1309,26 @@ export async function getCheckoutReservationBySession(
     : null;
 }
 
+export async function listCheckoutReservationsForReconciliation(
+  limit = 5,
+): Promise<CheckoutReservation[]> {
+  await ensureSchema();
+  const boundedLimit = Math.max(1, Math.min(20, Math.floor(limit)));
+  const rows = await databaseSql()`
+    SELECT *
+    FROM checkout_reservations
+    WHERE status = 'checkout_created'
+      AND stripe_checkout_session_id IS NOT NULL
+      AND expires_at <= NOW()
+    ORDER BY expires_at ASC
+    LIMIT ${boundedLimit}
+  `;
+
+  return rows.map((row) =>
+    mapReservation(row as Record<string, unknown>),
+  );
+}
+
 export async function fulfillCheckoutReservation(
   input: FulfillCheckoutReservationInput,
 ): Promise<CheckoutFulfillmentResult | null> {

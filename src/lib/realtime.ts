@@ -7,6 +7,7 @@ import {
   getPurchaseActivity,
   subscribeAvailability,
 } from "@/lib/store";
+import { maybeReconcileStaleStripeCheckouts } from "@/lib/stripe-reconciliation";
 
 export type LiveTicketingStatus = {
   availability: Availability;
@@ -42,6 +43,7 @@ function isCloudflareWorkerRuntime(): boolean {
 }
 
 async function loadStatus(eventId: string): Promise<LiveTicketingStatus> {
+  await maybeReconcileStaleStripeCheckouts();
   const [availability, activity] = await Promise.all([
     getAvailability(eventId),
     getPurchaseActivity(eventId),

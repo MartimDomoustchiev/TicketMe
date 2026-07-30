@@ -2,26 +2,18 @@
 
 import {
   Check,
-  CheckCircle2,
+  Clock3,
   CreditCard,
-  Download,
   Loader2,
   LockKeyhole,
-  Printer,
   Radio,
-  RefreshCw,
   ShieldCheck,
   Ticket,
   Users,
   WalletCards,
-  X,
 } from "lucide-react";
 import Link from "next/link";
 import { useMemo, useState } from "react";
-import {
-  StripeEmbeddedCheckout,
-  type StripeTicketResult,
-} from "@/components/checkout/StripeEmbeddedCheckout";
 import { useLiveTicketingStatus } from "@/components/ticketing/LiveTicketingProvider";
 import type { BuyerSession } from "@/lib/auth";
 import {
@@ -35,16 +27,8 @@ type Props = {
   event: CatalogEvent;
   initialAvailability: Availability;
   initialSession: BuyerSession | null;
-  stripePublishableKey: string | null;
+  paymentMode: "test" | "live" | null;
   locale?: "bg" | "en";
-};
-
-type StripeCheckoutSession = {
-  clientSecret: string;
-  checkoutSessionId: string;
-  reservationId: string;
-  expiresAt: string;
-  mode: "test";
 };
 
 const COPY = {
@@ -61,35 +45,20 @@ const COPY = {
     remaining: "билета остават за събитието",
     soldProgress: "Продадени билети",
     verifiedEmail: "Потвърден имейл",
-    processing: "Създаваме защитената Stripe форма…",
-    payStripe: "Плати със Stripe",
+    redirecting: "Отваряме сигурното Stripe плащане…",
+    checkout: "Продължи към плащане",
     signInTitle: "Вход преди поръчка",
     signInText: "Потвърди имейла си, за да получиш и изтеглиш билета.",
     signIn: "Вход или регистрация",
     secureIssuing: "Сигурно издаване",
     liveAvailability: "Жива наличност",
-    processedBy: "Stripe test mode — няма реално таксуване",
-    paymentOptions: "Stripe плащане в TicketMe",
-    walletHint: "Карта · Apple Pay · Google Pay",
+    processedBy: "Плащането се обработва сигурно от Stripe",
+    paymentOptions: "Карта и допустими дигитални портфейли",
+    walletHint:
+      "Stripe показва Apple Pay или Google Pay само когато са налични за твоето устройство.",
+    testPayment: "Stripe test mode — няма да бъдат таксувани реални средства.",
     reservationWindow:
-      "При отваряне мястото се резервира през честната опашка. Stripe формата остава в TicketMe.",
-    testNoticeTitle: "Stripe sandbox",
-    testNotice:
-      "Използвай тестова карта 4242 4242 4242 4242, бъдеща дата и произволен CVC. Apple Pay и Google Pay се показват само на поддържани устройства.",
-    successTitle: "Тестовото Stripe плащане е успешно",
-    successText: "Твоят PDF билет с QR код е готов.",
-    paymentReference: "Stripe референция",
-    cancelCheckout: "Смени билета",
-    cancellingCheckout: "Освобождаваме мястото…",
-    missingPublishableKey:
-      "Stripe sandbox конфигурацията е непълна. Нужни са matching sk_test_, pk_test_ и whsec_ стойности.",
-    openTicket: "Виж билета",
-    downloadPdf: "Изтегли PDF",
-    printPdf: "Отвори за печат",
-    buyAnother: "Купи още един",
-    emailSent: "Билетът е изпратен и по имейл.",
-    emailPending:
-      "Билетът е готов в профила ти; имейлът ще бъде изпратен повторно.",
+      "Билетът се резервира през честната опашка, докато завършиш плащането.",
     agreementStart: "С продължаването приемаш",
     terms: "Условията",
     and: "и",
@@ -112,35 +81,20 @@ const COPY = {
     remaining: "tickets left for this event",
     soldProgress: "Tickets sold",
     verifiedEmail: "Verified email",
-    processing: "Creating the secure Stripe form…",
-    payStripe: "Pay with Stripe",
+    redirecting: "Opening secure Stripe checkout…",
+    checkout: "Continue to payment",
     signInTitle: "Sign in to purchase",
     signInText: "Verify your email to receive and download your ticket.",
     signIn: "Sign in or register",
     secureIssuing: "Secure ticketing",
     liveAvailability: "Live availability",
-    processedBy: "Stripe test mode — no real charge",
-    paymentOptions: "Stripe payment inside TicketMe",
-    walletHint: "Card · Apple Pay · Google Pay",
+    processedBy: "Secure payment processing by Stripe",
+    paymentOptions: "Card and eligible digital wallets",
+    walletHint:
+      "Stripe shows Apple Pay or Google Pay only when available for your device.",
+    testPayment: "Stripe test mode — no real money will be charged.",
     reservationWindow:
-      "Opening checkout reserves the ticket through the fair queue. The Stripe form stays inside TicketMe.",
-    testNoticeTitle: "Stripe sandbox",
-    testNotice:
-      "Use test card 4242 4242 4242 4242, any future date and any CVC. Apple Pay and Google Pay only appear on eligible devices.",
-    successTitle: "Stripe test payment successful",
-    successText: "Your PDF ticket with its QR code is ready.",
-    paymentReference: "Stripe reference",
-    cancelCheckout: "Change ticket",
-    cancellingCheckout: "Releasing the ticket…",
-    missingPublishableKey:
-      "Stripe sandbox configuration is incomplete. Matching sk_test_, pk_test_, and whsec_ values are required.",
-    openTicket: "View ticket",
-    downloadPdf: "Download PDF",
-    printPdf: "Open to print",
-    buyAnother: "Buy another",
-    emailSent: "The ticket was also sent by email.",
-    emailPending:
-      "The ticket is ready in your account; email delivery will be retried.",
+      "Your ticket is reserved through the fair queue while you complete payment.",
     agreementStart: "By continuing, you accept the",
     terms: "Terms",
     and: "and",
@@ -187,7 +141,7 @@ export function TicketDesk({
   event,
   initialAvailability,
   initialSession,
-  stripePublishableKey,
+  paymentMode,
   locale = "bg",
 }: Props) {
   const [selectedType, setSelectedType] = useState<TicketTypeId>(
@@ -196,11 +150,6 @@ export function TicketDesk({
   );
   const [message, setMessage] = useState<string | null>(null);
   const [isBuying, setIsBuying] = useState(false);
-  const [isCancelling, setIsCancelling] = useState(false);
-  const [stripeSession, setStripeSession] =
-    useState<StripeCheckoutSession | null>(null);
-  const [purchaseResult, setPurchaseResult] =
-    useState<StripeTicketResult | null>(null);
   const liveStatus = useLiveTicketingStatus();
   const availability =
     liveStatus?.availability ?? initialAvailability;
@@ -232,12 +181,7 @@ export function TicketDesk({
       : 0;
 
   async function startStripeCheckout() {
-    if (
-      isBuying ||
-      stripeSession ||
-      !stripePublishableKey ||
-      selectedRemaining <= 0
-    ) {
+    if (isBuying || selectedRemaining <= 0) {
       return;
     }
 
@@ -254,66 +198,21 @@ export function TicketDesk({
           locale,
         }),
       });
-      const data = (await response.json()) as Partial<StripeCheckoutSession> & {
+      const data = (await response.json()) as {
+        checkoutUrl?: string;
         error?: string;
       };
 
-      if (
-        !response.ok ||
-        !data.clientSecret ||
-        !data.checkoutSessionId ||
-        !data.reservationId ||
-        !data.expiresAt ||
-        data.mode !== "test"
-      ) {
+      if (!response.ok || !data.checkoutUrl) {
         setMessage(data.error ?? copy.genericError);
         return;
       }
 
-      setStripeSession(data as StripeCheckoutSession);
+      window.location.assign(data.checkoutUrl);
     } catch {
       setMessage(copy.networkError);
     } finally {
       setIsBuying(false);
-    }
-  }
-
-  async function cancelStripeCheckout() {
-    if (!stripeSession || isCancelling) {
-      return;
-    }
-
-    setIsCancelling(true);
-    setMessage(null);
-
-    try {
-      const response = await fetch("/api/stripe/cancel", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          reservationId: stripeSession.reservationId,
-        }),
-      });
-      const payload = (await response.json()) as {
-        error?: string;
-        completed?: boolean;
-      };
-
-      if (!response.ok) {
-        setMessage(payload.error ?? copy.genericError);
-        return;
-      }
-
-      if (payload.completed) {
-        setMessage(copy.genericError);
-        return;
-      }
-
-      setStripeSession(null);
-    } catch {
-      setMessage(copy.networkError);
-    } finally {
-      setIsCancelling(false);
     }
   }
 
@@ -353,7 +252,7 @@ export function TicketDesk({
                   key={type.id}
                   type="button"
                   aria-pressed={isSelected}
-                  disabled={isSoldOut || Boolean(stripeSession)}
+                  disabled={isSoldOut}
                   onClick={() => setSelectedType(type.id)}
                   className={`group flex min-h-28 w-full items-start gap-3 rounded-2xl border bg-white p-4 text-left transition sm:items-center sm:gap-4 sm:p-5 ${
                     isSelected
@@ -473,72 +372,7 @@ export function TicketDesk({
             </p>
           </div>
 
-          {purchaseResult ? (
-            <div
-              className="mt-5 rounded-2xl border border-emerald-200 bg-emerald-50 p-4"
-              role="status"
-              aria-live="polite"
-            >
-              <span className="inline-flex h-11 w-11 items-center justify-center rounded-full bg-emerald-600 text-white">
-                <CheckCircle2 size={23} aria-hidden="true" />
-              </span>
-              <h4 className="mt-3 text-lg font-black text-emerald-950">
-                {copy.successTitle}
-              </h4>
-              <p className="mt-1 text-sm leading-6 text-emerald-800">
-                {copy.successText}
-              </p>
-              <dl className="mt-3 rounded-xl bg-white/75 p-3 text-xs text-emerald-950">
-                <div className="flex items-center justify-between gap-3">
-                  <dt className="font-bold">{copy.paymentReference}</dt>
-                  <dd className="break-all text-right font-mono font-black">
-                    {purchaseResult.paymentReference}
-                  </dd>
-                </div>
-              </dl>
-              <p className="mt-3 text-xs font-bold leading-5 text-emerald-800">
-                {purchaseResult.emailDelivered
-                  ? copy.emailSent
-                  : copy.emailPending}
-              </p>
-              <div className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-1">
-                <Link
-                  href={purchaseResult.ticketUrl}
-                  className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-emerald-700 px-4 text-sm font-black text-white transition hover:bg-emerald-800"
-                >
-                  <Ticket size={17} aria-hidden="true" />
-                  {copy.openTicket}
-                </Link>
-                <a
-                  href={purchaseResult.downloadUrl}
-                  className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-white px-4 text-sm font-black text-emerald-800 ring-1 ring-emerald-300 transition hover:bg-emerald-100"
-                >
-                  <Download size={17} aria-hidden="true" />
-                  {copy.downloadPdf}
-                </a>
-                <a
-                  href={purchaseResult.printUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-white px-4 text-sm font-black text-emerald-800 ring-1 ring-emerald-300 transition hover:bg-emerald-100"
-                >
-                  <Printer size={17} aria-hidden="true" />
-                  {copy.printPdf}
-                </a>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setPurchaseResult(null);
-                    setStripeSession(null);
-                  }}
-                  className="inline-flex h-11 items-center justify-center gap-2 rounded-xl px-4 text-sm font-black text-emerald-800 transition hover:bg-emerald-100"
-                >
-                  <RefreshCw size={16} aria-hidden="true" />
-                  {copy.buyAnother}
-                </button>
-              </div>
-            </div>
-          ) : session ? (
+          {session ? (
             <>
               <div className="mt-5 rounded-2xl bg-emerald-50 p-4">
                 <p className="flex items-center gap-2 text-sm font-black text-emerald-900">
@@ -549,140 +383,72 @@ export function TicketDesk({
                   {session.email}
                 </p>
               </div>
-              {stripeSession && stripePublishableKey ? (
-                <div className="mt-4">
-                  <div className="mb-3 flex items-center justify-between gap-3">
-                    <div>
-                      <p className="text-xs font-black uppercase tracking-[0.12em] text-blue-700">
-                        Stripe · Test mode
-                      </p>
-                      <p className="mt-1 text-xs font-bold text-slate-500">
-                        {copy.walletHint}
-                      </p>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={cancelStripeCheckout}
-                      disabled={isCancelling}
-                      className="inline-flex min-h-10 items-center justify-center gap-1.5 rounded-xl border border-slate-200 px-3 text-xs font-black text-slate-700 transition hover:border-slate-300 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
-                    >
-                      {isCancelling ? (
-                        <Loader2
-                          className="animate-spin"
-                          size={15}
-                          aria-hidden="true"
-                        />
-                      ) : (
-                        <X size={15} aria-hidden="true" />
-                      )}
-                      {isCancelling
-                        ? copy.cancellingCheckout
-                        : copy.cancelCheckout}
-                    </button>
-                  </div>
-                  <StripeEmbeddedCheckout
-                    publishableKey={stripePublishableKey}
-                    clientSecret={stripeSession.clientSecret}
-                    checkoutSessionId={stripeSession.checkoutSessionId}
-                    locale={locale}
-                    onComplete={(result) => {
-                      setStripeSession(null);
-                      setPurchaseResult(result);
-                    }}
+              <p className="mt-4 flex items-start gap-2 rounded-2xl border border-blue-100 bg-blue-50 p-3.5 text-xs font-bold leading-5 text-blue-900">
+                <Clock3
+                  size={16}
+                  className="mt-0.5 shrink-0 text-blue-600"
+                  aria-hidden="true"
+                />
+                {copy.reservationWindow}
+              </p>
+              <button
+                type="button"
+                onClick={startStripeCheckout}
+                disabled={isBuying || selectedRemaining <= 0}
+                aria-busy={isBuying}
+                className="mt-3 inline-flex h-13 w-full items-center justify-center gap-2 rounded-2xl bg-blue-600 px-5 font-black text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-55"
+              >
+                {isBuying ? (
+                  <Loader2
+                    className="animate-spin"
+                    size={19}
+                    aria-hidden="true"
                   />
-                </div>
-              ) : (
-                <>
-                  <div className="mt-4 rounded-2xl border border-blue-100 bg-[linear-gradient(145deg,#f8fbff,#eef4ff)] p-4">
-                    <div className="flex items-start justify-between gap-3">
-                      <div>
-                        <p className="text-xs font-black uppercase tracking-[0.14em] text-blue-700">
-                          {copy.paymentOptions}
-                        </p>
-                        <p className="mt-1 text-xs font-bold text-slate-500">
-                          {copy.processedBy}
-                        </p>
-                      </div>
-                      <span className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[#635bff] text-white shadow-sm">
-                        <WalletCards size={20} aria-hidden="true" />
-                      </span>
-                    </div>
-                    <div className="mt-4 grid grid-cols-3 gap-2 text-center text-[11px] font-black">
-                      <span className="rounded-lg bg-black px-2 py-2 text-white">
-                        Apple Pay
-                      </span>
-                      <span className="rounded-lg bg-white px-2 py-2 text-slate-800 ring-1 ring-slate-200">
-                        G Pay
-                      </span>
-                      <span className="rounded-lg bg-white px-2 py-2 text-slate-800 ring-1 ring-slate-200">
-                        Card
-                      </span>
-                    </div>
-                  </div>
-                  <div className="mt-3 rounded-2xl border border-amber-200 bg-amber-50 p-3.5">
-                    <p className="flex items-center gap-2 text-xs font-black text-amber-950">
-                      <ShieldCheck
-                        size={16}
-                        className="shrink-0 text-amber-700"
-                        aria-hidden="true"
-                      />
-                      {copy.testNoticeTitle}
-                    </p>
-                    <p className="mt-2 text-[11px] leading-5 text-amber-900">
-                      {copy.testNotice}
-                    </p>
-                  </div>
-                  <p className="mt-3 text-xs font-bold leading-5 text-slate-600">
-                    {copy.reservationWindow}
-                  </p>
-                  {!stripePublishableKey && (
-                    <p className="mt-3 rounded-xl bg-rose-50 p-3 text-xs font-bold leading-5 text-rose-800">
-                      {copy.missingPublishableKey}
-                    </p>
-                  )}
-                  <button
-                    type="button"
-                    onClick={startStripeCheckout}
-                    disabled={
-                      isBuying ||
-                      !stripePublishableKey ||
-                      selectedRemaining <= 0
-                    }
-                    aria-busy={isBuying}
-                    className="mt-3 inline-flex h-13 w-full items-center justify-center gap-2 rounded-2xl bg-[#635bff] px-5 font-black text-white transition hover:bg-[#5148e5] disabled:cursor-not-allowed disabled:opacity-55"
-                  >
-                    {isBuying ? (
-                      <Loader2
-                        className="animate-spin"
-                        size={19}
-                        aria-hidden="true"
-                      />
-                    ) : (
-                      <CreditCard size={18} aria-hidden="true" />
-                    )}
-                    {isBuying
-                      ? copy.processing
-                      : `${copy.payStripe} · ${selectedPrice}`}
-                  </button>
-                  <p className="mt-3 text-center text-[11px] leading-5 text-slate-500">
-                    {copy.agreementStart}{" "}
-                    <Link
-                      href={`/${locale}/terms`}
-                      className="font-bold underline underline-offset-2 hover:text-slate-800"
-                    >
-                      {copy.terms}
-                    </Link>{" "}
-                    {copy.and}{" "}
-                    <Link
-                      href={`/${locale}/privacy`}
-                      className="font-bold underline underline-offset-2 hover:text-slate-800"
-                    >
-                      {copy.privacy}
-                    </Link>
-                    .
-                  </p>
-                </>
+                ) : (
+                  <CreditCard size={18} aria-hidden="true" />
+                )}
+                {isBuying
+                  ? copy.redirecting
+                  : `${copy.checkout} · ${selectedPrice}`}
+              </button>
+              <div className="mt-3 rounded-2xl border border-slate-200 bg-slate-50 p-3.5">
+                <p className="flex items-center justify-center gap-2 text-xs font-black text-slate-700">
+                  <WalletCards
+                    size={16}
+                    className="text-blue-600"
+                    aria-hidden="true"
+                  />
+                  {copy.paymentOptions}
+                </p>
+                <p className="mt-2 text-center text-[11px] leading-4 text-slate-500">
+                  {copy.walletHint}
+                </p>
+              </div>
+              <p className="mt-3 text-center text-xs font-bold text-slate-500">
+                {copy.processedBy}
+              </p>
+              {paymentMode === "test" && (
+                <p className="mt-2 text-center text-[11px] font-bold leading-5 text-amber-700">
+                  {copy.testPayment}
+                </p>
               )}
+              <p className="mt-2 text-center text-[11px] leading-5 text-slate-500">
+                {copy.agreementStart}{" "}
+                <Link
+                  href={`/${locale}/terms`}
+                  className="font-bold underline underline-offset-2 hover:text-slate-800"
+                >
+                  {copy.terms}
+                </Link>{" "}
+                {copy.and}{" "}
+                <Link
+                  href={`/${locale}/privacy`}
+                  className="font-bold underline underline-offset-2 hover:text-slate-800"
+                >
+                  {copy.privacy}
+                </Link>
+                .
+              </p>
             </>
           ) : (
             <div className="mt-5 rounded-2xl border border-blue-100 bg-blue-50 p-4">

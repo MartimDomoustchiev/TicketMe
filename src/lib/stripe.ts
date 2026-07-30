@@ -20,22 +20,6 @@ export function stripeMode(): StripeMode | null {
   return null;
 }
 
-export function stripePublishableMode(): StripeMode | null {
-  const key =
-    process.env.STRIPE_PUBLISHABLE_KEY ??
-    process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY;
-
-  if (key?.startsWith("pk_test_")) {
-    return "test";
-  }
-
-  if (key?.startsWith("pk_live_")) {
-    return "live";
-  }
-
-  return null;
-}
-
 export function isStripeConfigured(): boolean {
   return stripeMode() !== null;
 }
@@ -43,26 +27,6 @@ export function isStripeConfigured(): boolean {
 export function isStripeWebhookConfigured(): boolean {
   return Boolean(
     process.env.STRIPE_WEBHOOK_SECRET?.startsWith("whsec_"),
-  );
-}
-
-export function isStripeEmbeddedTestConfigured(): boolean {
-  return (
-    stripeMode() === "test" &&
-    stripePublishableMode() === "test" &&
-    isStripeWebhookConfigured()
-  );
-}
-
-export function getStripeTestPublishableKey(): string | null {
-  if (!isStripeEmbeddedTestConfigured()) {
-    return null;
-  }
-
-  return (
-    process.env.STRIPE_PUBLISHABLE_KEY ??
-    process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY ??
-    null
   );
 }
 

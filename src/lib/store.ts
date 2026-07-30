@@ -171,6 +171,15 @@ export function getCheckoutReservationBySession(
     : fileStore.getCheckoutReservationBySession(stripeCheckoutSessionId);
 }
 
+export function listCheckoutReservationsForReconciliation(
+  limit = 5,
+): Promise<CheckoutReservation[]> {
+  assertPersistenceConfigured();
+  return hasPostgres()
+    ? postgresStore.listCheckoutReservationsForReconciliation(limit)
+    : fileStore.listCheckoutReservationsForReconciliation(limit);
+}
+
 export function fulfillCheckoutReservation(
   input: FulfillCheckoutReservationInput,
 ): Promise<CheckoutFulfillmentResult | null> {

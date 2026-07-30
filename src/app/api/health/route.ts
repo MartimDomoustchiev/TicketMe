@@ -4,7 +4,7 @@ import {
 } from "@/lib/database";
 import { isEmailReadyForArbitraryRecipients } from "@/lib/email";
 import { resolvePublicBaseUrl } from "@/lib/site";
-import { stripeMode, stripePublishableMode } from "@/lib/stripe";
+import { isStripeWebhookConfigured, stripeMode } from "@/lib/stripe";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -13,7 +13,7 @@ export async function GET() {
   const postgresConfigured = isDatabaseConfigured();
   const development = process.env.NODE_ENV !== "production";
   const configuredStripeMode = stripeMode();
-  const checks = {
+  const requiredChecks = {
     database: postgresConfigured || development,
     email:
       isEmailReadyForArbitraryRecipients() || development,
@@ -25,13 +25,9 @@ export async function GET() {
           process.env.S3_SECRET_ACCESS_KEY,
       ) || development,
     publicUrl: Boolean(resolvePublicBaseUrl()) || development,
-    stripeTestSecret: configuredStripeMode === "test" || development,
-    stripeTestPublishable:
-      stripePublishableMode() === "test" || development,
-    stripeWebhook:
-      Boolean(process.env.STRIPE_WEBHOOK_SECRET?.startsWith("whsec_")) ||
-      development,
+    stripe: configuredStripeMode !== null || development,
   };
+  const stripeWebhook = isStripeWebhookConfigured();
 
   let databaseReachable = development;
   let databaseSchemaReady = development;
@@ -53,14 +49,20 @@ export async function GET() {
     databaseReachable &&
     databaseSchemaReady &&
     databaseTlsReady &&
-    Object.values(checks).every((check) => check);
+    Object.values(requiredChecks).every((check) => check);
 
   return Response.json(
     {
       status: ready ? "ready" : "degraded",
-      paymentMode: "stripe-test-embedded",
+      paymentMode: configuredStripeMode
+        ? `stripe-hosted-${configuredStripeMode}`
+        : "unavailable",
+      fulfillmentMode: stripeWebhook
+        ? "stripe-webhook-and-success-return"
+        : "stripe-success-return-and-reconciliation",
       checks: {
-        ...checks,
+        ...requiredChecks,
+        stripeWebhook,
         databaseReachable,
         databaseSchemaReady,
         databaseTls,

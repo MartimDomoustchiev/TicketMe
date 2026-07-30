@@ -974,6 +974,29 @@ export async function getCheckoutReservationBySession(
   return reservation ? publicReservation(reservation) : null;
 }
 
+export async function listCheckoutReservationsForReconciliation(
+  limit = 5,
+): Promise<CheckoutReservation[]> {
+  await releaseExpiredCheckoutReservations();
+  const boundedLimit = Math.max(1, Math.min(20, Math.floor(limit)));
+  const now = Date.now();
+  const state = await readState();
+
+  return Object.values(state.checkoutReservations)
+    .filter(
+      (reservation) =>
+        reservation.status === "checkout_created" &&
+        Boolean(reservation.stripeCheckoutSessionId) &&
+        Date.parse(reservation.expiresAt) <= now,
+    )
+    .sort(
+      (left, right) =>
+        Date.parse(left.expiresAt) - Date.parse(right.expiresAt),
+    )
+    .slice(0, boundedLimit)
+    .map(publicReservation);
+}
+
 export async function fulfillCheckoutReservation(
   input: FulfillCheckoutReservationInput,
 ): Promise<CheckoutFulfillmentResult | null> {

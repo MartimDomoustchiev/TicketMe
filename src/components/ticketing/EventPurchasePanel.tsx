@@ -49,7 +49,7 @@ const COPY = {
     backToEvents: "Разгледай събитията",
     live: "На живо",
     connecting: "Свързване",
-    secureVerified: "Stripe test плащане в сайта и потвърден имейл",
+    secureVerified: "Сигурно Stripe плащане и потвърден имейл",
     externalSource: "Покупката се завършва при посочения източник",
   },
   en: {
@@ -69,7 +69,7 @@ const COPY = {
     backToEvents: "Browse events",
     live: "Live",
     connecting: "Connecting",
-    secureVerified: "On-site Stripe test payment and verified email",
+    secureVerified: "Secure Stripe checkout and verified email",
     externalSource: "Purchase is completed with the attributed source",
   },
 } as const;

@@ -18,13 +18,13 @@ function purchaseRequest(origin = "https://tickets.example") {
   });
 }
 
-test("direct demo ticket issuing is disabled", async () => {
+test("direct ticket issuing is disabled", async () => {
   const response = await purchasePost(purchaseRequest());
 
   assert.equal(response.status, 410);
   assert.deepEqual(await response.json(), {
     error:
-      "Direct demo ticket issuing has been removed. Continue with the embedded Stripe test checkout.",
+      "Direct ticket issuing is disabled. Continue with secure Stripe Checkout.",
   });
 });
 
