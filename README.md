@@ -46,7 +46,8 @@ Snapshot-ът е нормализиран от публичния календа
   admission label и QR код с безопасна quiet zone.
 - Private cloud storage за PDF файловете и защитено изтегляне през сайта.
 - PDF attachment и download линк в transactional email след заявката.
-- Наличности в реално време чрез Server-Sent Events (SSE), без refresh.
+- Наличности, FIFO queue depth и активни Checkout-и в реално време чрез
+  Server-Sent Events (SSE), без refresh.
 - Durable FIFO опашка в PostgreSQL и атомарно издаване без oversell.
 - Потребителска секция за достъп до собствените билети.
 - Админ панел за поръчки и еднократен QR check-in.
@@ -71,7 +72,7 @@ Snapshot-ът е нормализиран от публичния календа
 | Cloud storage | В production PDF-ите се записват в private Cloudflare R2 или AWS S3 bucket. |
 | Email доставка | Resend изпраща PDF attachment и защитен линк за изтегляне. |
 | Изтегляне от сайта | Собственикът на билета или администратор може да го изтегли през защитен route. |
-| Live наличности | Event-scoped SSE stream изпраща промените към всички отворени клиенти. |
+| Live наличности | Event-scoped SSE stream изпраща inventory, queue depth и активни Checkout-и към всички отворени клиенти. |
 | Честна опашка | PostgreSQL `purchase_queue` подрежда reservation заявките по `BIGSERIAL` позиция за всяка event/category lane. |
 | Без oversell | Guarded inventory decrement и reservation insert са в една PostgreSQL транзакция под advisory и row lock. |
 | Натоварване | Кратката DB транзакция пази наличността; Stripe, PDF, storage и email I/O са извън allocation critical section. |
@@ -188,10 +189,12 @@ in-process FIFO lane и file mutation lock. В production `DATABASE_URL` е
 
 ### Realtime наличности
 
-`GET /api/events?eventId=...` отваря SSE stream. Един shared channel на
-application instance обслужва всички локални subscribers за събитието,
-изпраща незабавни локални промени и проверява PostgreSQL на всеки 3 секунди за
-покупки, обработени от други instances. Heartbeat пази връзката активна.
+`GET /api/events?eventId=...` отваря SSE stream за оставащата наличност,
+текущата дълбочина на FIFO опашката и активните Checkout reservations. Един
+shared channel на application instance обслужва всички локални subscribers за
+събитието, изпраща незабавни локални промени и проверява PostgreSQL на всеки
+3 секунди за покупки, обработени от други instances. Heartbeat пази връзката
+активна, а клиентът използва кратък polling fallback само при прекъснат stream.
 
 ### Persistence adapters
 
@@ -602,8 +605,8 @@ PostgreSQL през `DATABASE_URL`, когато той е конфигурир�
 | `POST /api/verify/start` | JSON compatibility endpoint за нов verification email. |
 | `GET /api/verify/confirm` | Compatibility redirect към безопасната confirmation страница; не променя state. |
 | `POST /api/verify/confirm` | Консумира еднократен hashed token, потвърждава профила и създава session. |
-| `GET /api/event?eventId=...` | Event payload и текуща наличност. |
-| `GET /api/events?eventId=...` | Event-scoped SSE availability stream. |
+| `GET /api/event?eventId=...` | Event payload, текуща наличност и purchase activity. |
+| `GET /api/events?eventId=...` | Event-scoped SSE stream за inventory, queue и активни Checkout-и. |
 | `POST /api/stripe/checkout` | Създава FIFO reservation и hosted Stripe Checkout Session. |
 | `POST /api/stripe/webhook` | Verified, idempotent completion/expiry обработка. |
 | `POST /api/stripe/cancel` | Buyer-owned cancellation и незабавно освобождаване на reservation. |

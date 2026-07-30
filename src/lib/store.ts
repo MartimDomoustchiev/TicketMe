@@ -12,6 +12,7 @@ import type {
   FulfillCheckoutReservationInput,
   ReleaseTicketDeliveryInput,
   ReserveCheckoutTicketInput,
+  PurchaseActivity,
   StoredTicket,
   TicketDeliveryClaim,
   VerificationToken,
@@ -29,6 +30,7 @@ export type {
   FulfillCheckoutReservationInput,
   ReleaseTicketDeliveryInput,
   ReserveCheckoutTicketInput,
+  PurchaseActivity,
   StoredTicket,
   TicketDeliveryClaim,
   TicketDeliveryStatus,
@@ -59,6 +61,15 @@ export function getAvailability(
   return hasPostgres()
     ? postgresStore.getAvailability(eventId)
     : fileStore.getAvailability(eventId);
+}
+
+export function getPurchaseActivity(
+  eventId: string = EVENT.id,
+): Promise<PurchaseActivity> {
+  assertPersistenceConfigured();
+  return hasPostgres()
+    ? postgresStore.getPurchaseActivity(eventId)
+    : fileStore.getPurchaseActivity(eventId);
 }
 
 export function createVerificationToken(input: {

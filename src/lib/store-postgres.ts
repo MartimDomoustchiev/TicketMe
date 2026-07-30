@@ -19,6 +19,7 @@ import type {
   FulfillCheckoutReservationInput,
   ReleaseTicketDeliveryInput,
   ReserveCheckoutTicketInput,
+  PurchaseActivity,
   StoredTicket,
   TicketDeliveryClaim,
   TicketDeliveryStatus,
@@ -455,6 +456,33 @@ export async function getAvailability(
     emitAvailability(event.id, availability);
   }
   return availability;
+}
+
+export async function getPurchaseActivity(
+  eventId: string = EVENT.id,
+): Promise<PurchaseActivity> {
+  const event = await ensureEventInventory(eventId);
+  const rows = await databaseSql()`
+    SELECT
+      (
+        SELECT COUNT(*)::INTEGER
+        FROM purchase_queue
+        WHERE event_id = ${event.id}
+          AND lease_expires_at > NOW()
+      ) AS queue_depth,
+      (
+        SELECT COUNT(*)::INTEGER
+        FROM checkout_reservations
+        WHERE event_id = ${event.id}
+          AND status IN ('reserved', 'checkout_created')
+          AND expires_at > NOW()
+      ) AS active_checkouts
+  `;
+
+  return {
+    queueDepth: Number(rows[0]?.queue_depth ?? 0),
+    activeCheckouts: Number(rows[0]?.active_checkouts ?? 0),
+  };
 }
 
 async function readAvailability(eventId: string): Promise<Availability> {

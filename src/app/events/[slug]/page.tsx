@@ -7,7 +7,6 @@ import {
   MapPin,
   QrCode,
   ShieldCheck,
-  Ticket,
   Users,
 } from "lucide-react";
 import type { Metadata } from "next";
@@ -18,11 +17,11 @@ import { TicketDesk } from "@/components/TicketDesk";
 import { EventCard } from "@/components/marketplace/EventCard";
 import { MarketplaceFooter } from "@/components/marketplace/MarketplaceFooter";
 import { MarketplaceHeader } from "@/components/marketplace/MarketplaceHeader";
+import { EventPurchasePanel } from "@/components/ticketing/EventPurchasePanel";
+import { LiveTicketingProvider } from "@/components/ticketing/LiveTicketingProvider";
 import {
   categoryLabel,
-  externalSourceLabel,
   formatEventDate,
-  formatPrice,
   formatVenueLocation,
   localizedEventDescription,
   localizedEventTagline,
@@ -35,7 +34,10 @@ import {
   listRelatedCatalogEvents,
 } from "@/lib/catalog";
 import { getLocale, localizeHref } from "@/lib/i18n";
-import { getPublicAvailability } from "@/lib/public-availability";
+import {
+  getPublicAvailability,
+  getPublicPurchaseActivity,
+} from "@/lib/public-availability";
 import { getBaseUrl } from "@/lib/site";
 import { getEventVisual } from "@/lib/event-visual";
 
@@ -81,10 +83,19 @@ export default async function EventPage({ params }: EventPageProps) {
 
   const internalSale = isInternallySoldEvent(event);
   const visual = getEventVisual(event);
-  const [availability, buyerSession, locale, relatedEvents] = await Promise.all([
+  const [
+    availability,
+    purchaseActivity,
+    buyerSession,
+    locale,
+    relatedEvents,
+  ] = await Promise.all([
     internalSale
       ? getPublicAvailability(event.id)
       : Promise.resolve(null),
+    internalSale
+      ? getPublicPurchaseActivity(event.id)
+      : Promise.resolve({ queueDepth: 0, activeCheckouts: 0 }),
     internalSale
       ? getBuyerSession().catch(() => null)
       : Promise.resolve(null),
@@ -133,10 +144,15 @@ export default async function EventPage({ params }: EventPageProps) {
   };
 
   return (
-    <main
-      id="main-content"
-      className="min-h-screen bg-[#f6f8fc] text-[#10172a]"
+    <LiveTicketingProvider
+      eventId={internalSale && availability ? event.id : null}
+      initialAvailability={availability}
+      initialActivity={purchaseActivity}
     >
+      <main
+        id="main-content"
+        className="min-h-screen bg-[#f6f8fc] text-[#10172a]"
+      >
       <MarketplaceHeader />
 
       <script
@@ -241,60 +257,12 @@ export default async function EventPage({ params }: EventPageProps) {
             </div>
           </div>
 
-          <aside className="rounded-2xl border border-white/15 bg-white p-5 text-[#10172a] shadow-2xl shadow-black/25 sm:p-6">
-            <p className="text-xs font-black uppercase tracking-wider text-slate-500">
-              {internalSale
-                ? copy.ticketsFrom
-                : externalSourceLabel(event, locale)}
-            </p>
-            <p className="mt-1 text-3xl font-black tracking-[-0.03em]">
-              {internalSale || event.priceAvailable === true
-                ? formatPrice(event, locale)
-                : event.sourceName}
-            </p>
-            <div className="my-5 h-px bg-slate-200" />
-            {internalSale && (
-              <p className="flex items-center justify-between gap-4 text-sm">
-                <span className="font-semibold text-slate-500">
-                  {copy.availability}
-                </span>
-                <span className="font-black text-emerald-700">
-                  {availability
-                    ? availability.totalRemaining > 0
-                      ? copy.ticketsAvailable(availability.totalRemaining)
-                      : copy.soldOut
-                    : copy.availabilityUnavailable}
-                </span>
-              </p>
-            )}
-            <a
-              href={
-                internalSale
-                  ? availability
-                    ? "#tickets"
-                    : localizeHref(locale, "/events")
-                  : event.sourceUrl
-              }
-              target={internalSale ? undefined : "_blank"}
-              rel={internalSale ? undefined : "noreferrer"}
-              className="mt-5 inline-flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-[#2457ff] px-5 font-black text-white transition hover:bg-blue-700 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-blue-200"
-            >
-              <Ticket size={18} aria-hidden="true" />
-              {internalSale
-                ? availability
-                  ? copy.chooseTickets
-                  : copy.backToEvents
-                : copy.openOfficialPage}
-            </a>
-            <p className="mt-4 flex items-center justify-center gap-2 text-xs font-bold text-slate-500">
-              <ShieldCheck size={15} className="text-emerald-600" aria-hidden="true" />
-              {internalSale
-                ? copy.secureVerified
-                : event.sourceOfficial
-                  ? copy.officialSourceLinked
-                  : copy.sourceLinked}
-            </p>
-          </aside>
+          <EventPurchasePanel
+            event={event}
+            internalSale={internalSale}
+            availabilityAvailable={availability !== null}
+            locale={locale}
+          />
         </div>
       </section>
 
@@ -469,7 +437,8 @@ export default async function EventPage({ params }: EventPageProps) {
       )}
 
       <MarketplaceFooter />
-    </main>
+      </main>
+    </LiveTicketingProvider>
   );
 }
 

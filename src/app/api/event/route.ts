@@ -3,7 +3,10 @@ import {
   isInternallySoldEvent,
 } from "@/lib/catalog";
 import { EVENT } from "@/lib/event";
-import { getAvailability } from "@/lib/store";
+import {
+  getAvailability,
+  getPurchaseActivity,
+} from "@/lib/store";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -18,10 +21,24 @@ export async function GET(request: Request) {
     return Response.json({ error: "Event not found" }, { status: 404 });
   }
 
-  return Response.json({
-    event,
-    availability: isInternallySoldEvent(event)
-      ? await getAvailability(event.id)
-      : null,
-  });
+  const internalSale = isInternallySoldEvent(event);
+  const [availability, activity] = internalSale
+    ? await Promise.all([
+        getAvailability(event.id),
+        getPurchaseActivity(event.id),
+      ])
+    : [null, null];
+
+  return Response.json(
+    {
+      event,
+      availability,
+      activity,
+    },
+    {
+      headers: {
+        "Cache-Control": "no-store",
+      },
+    },
+  );
 }

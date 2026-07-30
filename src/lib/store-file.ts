@@ -132,6 +132,11 @@ export type Availability = {
   sold: number;
 };
 
+export type PurchaseActivity = {
+  queueDepth: number;
+  activeCheckouts: number;
+};
+
 type EventInventory = Partial<Record<TicketTypeId, number>>;
 
 type DbState = {
@@ -556,6 +561,29 @@ export async function getAvailability(
     emitAvailability(event.id, result.availability);
   }
   return result.availability;
+}
+
+export async function getPurchaseActivity(
+  eventId: string = EVENT.id,
+): Promise<PurchaseActivity> {
+  requireEvent(eventId);
+  const state = await readState();
+  const now = Date.now();
+  const activeCheckouts = Object.values(
+    state.checkoutReservations,
+  ).filter(
+    (reservation) =>
+      reservation.eventId === eventId &&
+      isActiveReservation(reservation) &&
+      Date.parse(reservation.expiresAt) > now,
+  ).length;
+
+  return {
+    // Local JSON mutations are serialized by one process and do not wait in
+    // the distributed PostgreSQL purchase queue.
+    queueDepth: 0,
+    activeCheckouts,
+  };
 }
 
 export async function createVerificationToken(input: {

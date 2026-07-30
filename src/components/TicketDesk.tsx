@@ -9,10 +9,12 @@ import {
   Radio,
   ShieldCheck,
   Ticket,
+  Users,
   WalletCards,
 } from "lucide-react";
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
+import { useLiveTicketingStatus } from "@/components/ticketing/LiveTicketingProvider";
 import type { BuyerSession } from "@/lib/auth";
 import {
   formatDualCurrencyPrice,
@@ -61,6 +63,8 @@ const COPY = {
     privacy: "Политиката за поверителност",
     genericError: "Плащането не можа да бъде стартирано. Опитай отново.",
     networkError: "Връзката беше прекъсната. Опитай отново.",
+    queueNow: "в опашката сега",
+    activeCheckouts: "активни плащания",
   },
   en: {
     ticketTypesEyebrow: "Ticket types",
@@ -94,6 +98,8 @@ const COPY = {
     privacy: "Privacy Policy",
     genericError: "We could not start the payment. Please try again.",
     networkError: "The connection was interrupted. Please try again.",
+    queueNow: "in queue now",
+    activeCheckouts: "active checkouts",
   },
 } as const;
 
@@ -134,35 +140,22 @@ export function TicketDesk({
   initialSession,
   locale = "bg",
 }: Props) {
-  const [availability, setAvailability] = useState(initialAvailability);
   const [selectedType, setSelectedType] = useState<TicketTypeId>(
     event.ticketTypes.find((type) => type.id === "standard")?.id ??
       event.ticketTypes[0].id,
   );
   const [message, setMessage] = useState<string | null>(null);
   const [isBuying, setIsBuying] = useState(false);
-  const [isLive, setIsLive] = useState(false);
+  const liveStatus = useLiveTicketingStatus();
+  const availability =
+    liveStatus?.availability ?? initialAvailability;
+  const activity = liveStatus?.activity ?? {
+    queueDepth: 0,
+    activeCheckouts: 0,
+  };
+  const isLive = liveStatus?.isLive ?? false;
   const session = initialSession;
   const copy = COPY[locale];
-
-  useEffect(() => {
-    const source = new EventSource(
-      `/api/events?eventId=${encodeURIComponent(event.id)}`,
-    );
-
-    source.onopen = () => setIsLive(true);
-    source.onmessage = (messageEvent) => {
-      try {
-        setAvailability(JSON.parse(messageEvent.data) as Availability);
-        setIsLive(true);
-      } catch {
-        setIsLive(false);
-      }
-    };
-    source.onerror = () => setIsLive(false);
-
-    return () => source.close();
-  }, [event.id]);
 
   const selectedTicket = useMemo(
     () =>
@@ -347,6 +340,31 @@ export function TicketDesk({
             </div>
             <p className="mt-2 text-xs font-bold text-slate-500">
               {availability.totalRemaining} {copy.remaining}
+            </p>
+          </div>
+
+          <div className="mt-4 grid grid-cols-2 gap-2">
+            <p className="flex items-center gap-2 rounded-xl bg-slate-50 px-3 py-2 text-xs font-black text-slate-700">
+              <Users size={15} className="text-blue-600" aria-hidden="true" />
+              <span>
+                <strong className="tabular-nums">
+                  {activity.queueDepth}
+                </strong>{" "}
+                {copy.queueNow}
+              </span>
+            </p>
+            <p className="flex items-center justify-end gap-2 rounded-xl bg-slate-50 px-3 py-2 text-right text-xs font-black text-slate-700">
+              <CreditCard
+                size={15}
+                className="text-blue-600"
+                aria-hidden="true"
+              />
+              <span>
+                <strong className="tabular-nums">
+                  {activity.activeCheckouts}
+                </strong>{" "}
+                {copy.activeCheckouts}
+              </span>
             </p>
           </div>
 

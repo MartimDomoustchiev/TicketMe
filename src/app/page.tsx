@@ -46,6 +46,8 @@ export default async function Home() {
   const copy = HOME_COPY[locale];
   const popularEvents = catalogEvents.toSorted(
     (left, right) =>
+      Number(isEventOpenForInternalSale(right)) -
+        Number(isEventOpenForInternalSale(left)) ||
       Number(Boolean(right.featured)) - Number(Boolean(left.featured)) ||
       (right.bangerScore ?? 0) - (left.bangerScore ?? 0) ||
       eventTimestamp(left) - eventTimestamp(right),
@@ -545,7 +547,7 @@ function CategoryCard({
 const HOME_COPY = {
   bg: {
     weeklyHighlight: "Акцент на седмицата",
-    chooseTickets: "Избери билети",
+    chooseTickets: "Купи билет",
     moreInformation: "Повече информация",
     ticketsFrom: "Билети от",
     officialListing: "Официален източник",
@@ -599,7 +601,7 @@ const HOME_COPY = {
   },
   en: {
     weeklyHighlight: "Highlight of the week",
-    chooseTickets: "Choose tickets",
+    chooseTickets: "Buy ticket",
     moreInformation: "More information",
     ticketsFrom: "Tickets from",
     officialListing: "Official source",

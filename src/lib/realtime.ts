@@ -1,7 +1,19 @@
-import type { Availability } from "@/lib/store";
-import { getAvailability, subscribeAvailability } from "@/lib/store";
+import type {
+  Availability,
+  PurchaseActivity,
+} from "@/lib/store";
+import {
+  getAvailability,
+  getPurchaseActivity,
+  subscribeAvailability,
+} from "@/lib/store";
 
-type Subscriber = (availability: Availability) => void;
+export type LiveTicketingStatus = {
+  availability: Availability;
+  activity: PurchaseActivity;
+};
+
+type Subscriber = (status: LiveTicketingStatus) => void;
 
 type RealtimeChannel = {
   subscribers: Set<Subscriber>;
@@ -29,15 +41,23 @@ function isCloudflareWorkerRuntime(): boolean {
   );
 }
 
-function publish(channel: RealtimeChannel, availability: Availability): void {
-  const payload = JSON.stringify(availability);
+async function loadStatus(eventId: string): Promise<LiveTicketingStatus> {
+  const [availability, activity] = await Promise.all([
+    getAvailability(eventId),
+    getPurchaseActivity(eventId),
+  ]);
+  return { availability, activity };
+}
+
+function publish(channel: RealtimeChannel, status: LiveTicketingStatus): void {
+  const payload = JSON.stringify(status);
   if (payload === channel.lastPayload) {
     return;
   }
 
   channel.lastPayload = payload;
   for (const subscriber of channel.subscribers) {
-    subscriber(availability);
+    subscriber(status);
   }
 }
 
@@ -49,24 +69,27 @@ async function createChannel(eventId: string): Promise<RealtimeChannel> {
   };
 
   channels().set(eventId, channel);
-  channel.unsubscribeStore = subscribeAvailability(eventId, (availability) =>
-    publish(channel, availability),
-  );
-
-  publish(channel, await getAvailability(eventId));
-  channel.poller = setInterval(async () => {
+  const refresh = async () => {
     if (channel.polling) {
       return;
     }
 
     channel.polling = true;
     try {
-      publish(channel, await getAvailability(eventId));
+      publish(channel, await loadStatus(eventId));
     } catch {
       // The next shared poll retries without disconnecting every client.
     } finally {
       channel.polling = false;
     }
+  };
+
+  channel.unsubscribeStore = subscribeAvailability(eventId, () => {
+    void refresh();
+  });
+  await refresh();
+  channel.poller = setInterval(() => {
+    void refresh();
   }, 3000);
 
   return channel;
@@ -85,19 +108,19 @@ async function subscribeRequestScopedAvailability(
   let lastPayload = "";
   let poller: ReturnType<typeof setTimeout> | undefined;
 
-  const deliver = (availability: Availability): void => {
-    const payload = JSON.stringify(availability);
+  const deliver = (status: LiveTicketingStatus): void => {
+    const payload = JSON.stringify(status);
     if (!cancelled && payload !== lastPayload) {
       lastPayload = payload;
-      subscriber(availability);
+      subscriber(status);
     }
   };
 
-  deliver(await getAvailability(eventId));
+  deliver(await loadStatus(eventId));
 
   const poll = async (): Promise<void> => {
     try {
-      deliver(await getAvailability(eventId));
+      deliver(await loadStatus(eventId));
     } catch {
       // A later request-scoped poll retries while the SSE connection is open.
     } finally {
@@ -135,7 +158,7 @@ export async function subscribeRealtimeAvailability(
   channel.subscribers.add(subscriber);
 
   if (channel.lastPayload) {
-    subscriber(JSON.parse(channel.lastPayload) as Availability);
+    subscriber(JSON.parse(channel.lastPayload) as LiveTicketingStatus);
   }
 
   return () => {
