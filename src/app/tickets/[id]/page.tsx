@@ -4,6 +4,7 @@ import {
   CheckCircle2,
   Download,
   MapPin,
+  Printer,
   QrCode,
   ShieldCheck,
   Ticket as TicketIcon,
@@ -188,13 +189,24 @@ export default async function TicketPage({
                   </dl>
                 </div>
 
-                <a
-                  href={`/api/tickets/${ticket.id}/download`}
-                  className="mt-6 inline-flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-[#2457ff] px-5 font-black text-white transition hover:bg-blue-700 sm:w-auto"
-                >
-                  <Download size={19} aria-hidden="true" />
-                  {copy.downloadPdf}
-                </a>
+                <div className="mt-6 flex flex-col gap-2 sm:flex-row">
+                  <a
+                    href={`/api/tickets/${ticket.id}/download`}
+                    className="inline-flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-[#2457ff] px-5 font-black text-white transition hover:bg-blue-700 sm:w-auto"
+                  >
+                    <Download size={19} aria-hidden="true" />
+                    {copy.downloadPdf}
+                  </a>
+                  <a
+                    href={`/api/tickets/${ticket.id}/download?print=1`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex h-12 w-full items-center justify-center gap-2 rounded-xl border border-slate-300 bg-white px-5 font-black text-slate-800 transition hover:border-blue-300 hover:text-blue-700 sm:w-auto"
+                  >
+                    <Printer size={19} aria-hidden="true" />
+                    {copy.printPdf}
+                  </a>
+                </div>
               </div>
 
               <aside className="border-t border-slate-200 bg-slate-50 p-5 sm:p-8 lg:border-l lg:border-t-0">
@@ -244,6 +256,7 @@ const TICKET_COPY = {
     ticketNumber: "Номер на билета",
     issuedOn: "Издаден на",
     downloadPdf: "Изтегли PDF билет",
+    printPdf: "Отвори за печат",
     qrAccess: "Достъп със QR код",
     qrText:
       "Уникалният QR код се намира в PDF билета. Покажи го на входа от телефона си или на разпечатан носител.",
@@ -266,6 +279,7 @@ const TICKET_COPY = {
     ticketNumber: "Ticket number",
     issuedOn: "Issued on",
     downloadPdf: "Download PDF ticket",
+    printPdf: "Open to print",
     qrAccess: "QR code admission",
     qrText:
       "Your unique QR code is included in the PDF ticket. Present it on your phone or as a printed copy at the entrance.",

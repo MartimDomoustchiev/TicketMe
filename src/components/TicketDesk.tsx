@@ -2,11 +2,14 @@
 
 import {
   Check,
-  Clock3,
+  CheckCircle2,
   CreditCard,
+  Download,
   Loader2,
   LockKeyhole,
+  Printer,
   Radio,
+  RefreshCw,
   ShieldCheck,
   Ticket,
   Users,
@@ -30,6 +33,21 @@ type Props = {
   locale?: "bg" | "en";
 };
 
+type DemoPurchaseResult = {
+  ticketId: string;
+  ticketUrl: string;
+  downloadUrl: string;
+  printUrl: string;
+  emailDelivered: boolean;
+  payment: {
+    mode: "demo";
+    reference: string;
+    charged: false;
+    amount: number;
+    currency: string;
+  };
+};
+
 const COPY = {
   bg: {
     ticketTypesEyebrow: "Видове билети",
@@ -44,24 +62,36 @@ const COPY = {
     remaining: "билета остават за събитието",
     soldProgress: "Продадени билети",
     verifiedEmail: "Потвърден имейл",
-    redirecting: "Отваряме сигурното плащане…",
-    checkout: "Продължи към плащане",
+    processing: "Издаваме твоя билет…",
+    payDemo: "Плати демо",
     signInTitle: "Вход преди поръчка",
     signInText: "Потвърди имейла си, за да получиш и изтеглиш билета.",
     signIn: "Вход или регистрация",
     secureIssuing: "Сигурно издаване",
     liveAvailability: "Жива наличност",
-    processedBy: "Плащането се обработва сигурно от Stripe",
-    paymentOptions: "Карта и допустими дигитални портфейли",
-    walletHint:
-      "Stripe Checkout показва само методите, налични за твоето устройство, държава и настройките на портфейла.",
+    processedBy: "Демо плащане в TicketMe — няма реално таксуване",
+    paymentOptions: "TicketMe Demo Card",
+    walletHint: "Тестова карта •••• 4242",
     reservationWindow:
-      "Избраният билет се пази 30 минути, докато завършиш плащането.",
+      "Заявката влиза в честната опашка. Билетът и PDF файлът се генерират тук, без пренасочване.",
+    demoNoticeTitle: "Симулация за училищния проект",
+    demoNotice:
+      "Не въвеждай истински данни за карта. При натискане ще издадем тестов билет, без да вземаме пари.",
+    successTitle: "Демо плащането е успешно",
+    successText: "Твоят PDF билет с QR код е готов.",
+    paymentReference: "Референция",
+    openTicket: "Виж билета",
+    downloadPdf: "Изтегли PDF",
+    printPdf: "Отвори за печат",
+    buyAnother: "Купи още един",
+    emailSent: "Билетът е изпратен и по имейл.",
+    emailPending:
+      "Билетът е готов в профила ти; имейлът ще бъде изпратен повторно.",
     agreementStart: "С продължаването приемаш",
     terms: "Условията",
     and: "и",
     privacy: "Политиката за поверителност",
-    genericError: "Плащането не можа да бъде стартирано. Опитай отново.",
+    genericError: "Билетът не можа да бъде издаден. Опитай отново.",
     networkError: "Връзката беше прекъсната. Опитай отново.",
     queueNow: "в опашката сега",
     activeCheckouts: "активни плащания",
@@ -79,24 +109,36 @@ const COPY = {
     remaining: "tickets left for this event",
     soldProgress: "Tickets sold",
     verifiedEmail: "Verified email",
-    redirecting: "Opening secure checkout…",
-    checkout: "Continue to payment",
+    processing: "Issuing your ticket…",
+    payDemo: "Demo pay",
     signInTitle: "Sign in to purchase",
     signInText: "Verify your email to receive and download your ticket.",
     signIn: "Sign in or register",
     secureIssuing: "Secure ticketing",
     liveAvailability: "Live availability",
-    processedBy: "Secure payment processing by Stripe",
-    paymentOptions: "Card and eligible digital wallets",
-    walletHint:
-      "Stripe Checkout only shows methods available for your device, country, and wallet setup.",
+    processedBy: "TicketMe demo payment — no real charge",
+    paymentOptions: "TicketMe Demo Card",
+    walletHint: "Test card •••• 4242",
     reservationWindow:
-      "Your selected ticket is held for 30 minutes while you complete payment.",
+      "Your request joins the fair queue. The ticket and PDF are generated here without a redirect.",
+    demoNoticeTitle: "School-project simulation",
+    demoNotice:
+      "Do not enter real card details. Clicking the button issues a test ticket without charging money.",
+    successTitle: "Demo payment successful",
+    successText: "Your PDF ticket with its QR code is ready.",
+    paymentReference: "Reference",
+    openTicket: "View ticket",
+    downloadPdf: "Download PDF",
+    printPdf: "Open to print",
+    buyAnother: "Buy another",
+    emailSent: "The ticket was also sent by email.",
+    emailPending:
+      "The ticket is ready in your account; email delivery will be retried.",
     agreementStart: "By continuing, you accept the",
     terms: "Terms",
     and: "and",
     privacy: "Privacy Policy",
-    genericError: "We could not start the payment. Please try again.",
+    genericError: "We could not issue the ticket. Please try again.",
     networkError: "The connection was interrupted. Please try again.",
     queueNow: "in queue now",
     activeCheckouts: "active checkouts",
@@ -146,6 +188,8 @@ export function TicketDesk({
   );
   const [message, setMessage] = useState<string | null>(null);
   const [isBuying, setIsBuying] = useState(false);
+  const [purchaseResult, setPurchaseResult] =
+    useState<DemoPurchaseResult | null>(null);
   const liveStatus = useLiveTicketingStatus();
   const availability =
     liveStatus?.availability ?? initialAvailability;
@@ -185,26 +229,36 @@ export function TicketDesk({
     setMessage(null);
 
     try {
-      const response = await fetch("/api/stripe/checkout", {
+      const response = await fetch("/api/purchase", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           eventId: event.id,
           ticketType: selectedType,
           locale,
+          paymentMode: "demo",
+          demoConfirmed: true,
         }),
       });
-      const data = (await response.json()) as {
-        checkoutUrl?: string;
+      const data = (await response.json()) as Partial<DemoPurchaseResult> & {
+        ok?: boolean;
         error?: string;
       };
 
-      if (!response.ok || !data.checkoutUrl) {
+      if (
+        !response.ok ||
+        !data.ok ||
+        !data.ticketId ||
+        !data.ticketUrl ||
+        !data.downloadUrl ||
+        !data.printUrl ||
+        !data.payment
+      ) {
         setMessage(data.error ?? copy.genericError);
         return;
       }
 
-      window.location.assign(data.checkoutUrl);
+      setPurchaseResult(data as DemoPurchaseResult);
     } catch {
       setMessage(copy.networkError);
     } finally {
@@ -368,7 +422,69 @@ export function TicketDesk({
             </p>
           </div>
 
-          {session ? (
+          {purchaseResult ? (
+            <div
+              className="mt-5 rounded-2xl border border-emerald-200 bg-emerald-50 p-4"
+              role="status"
+              aria-live="polite"
+            >
+              <span className="inline-flex h-11 w-11 items-center justify-center rounded-full bg-emerald-600 text-white">
+                <CheckCircle2 size={23} aria-hidden="true" />
+              </span>
+              <h4 className="mt-3 text-lg font-black text-emerald-950">
+                {copy.successTitle}
+              </h4>
+              <p className="mt-1 text-sm leading-6 text-emerald-800">
+                {copy.successText}
+              </p>
+              <dl className="mt-3 rounded-xl bg-white/75 p-3 text-xs text-emerald-950">
+                <div className="flex items-center justify-between gap-3">
+                  <dt className="font-bold">{copy.paymentReference}</dt>
+                  <dd className="break-all text-right font-mono font-black">
+                    {purchaseResult.payment.reference}
+                  </dd>
+                </div>
+              </dl>
+              <p className="mt-3 text-xs font-bold leading-5 text-emerald-800">
+                {purchaseResult.emailDelivered
+                  ? copy.emailSent
+                  : copy.emailPending}
+              </p>
+              <div className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-1">
+                <Link
+                  href={purchaseResult.ticketUrl}
+                  className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-emerald-700 px-4 text-sm font-black text-white transition hover:bg-emerald-800"
+                >
+                  <Ticket size={17} aria-hidden="true" />
+                  {copy.openTicket}
+                </Link>
+                <a
+                  href={purchaseResult.downloadUrl}
+                  className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-white px-4 text-sm font-black text-emerald-800 ring-1 ring-emerald-300 transition hover:bg-emerald-100"
+                >
+                  <Download size={17} aria-hidden="true" />
+                  {copy.downloadPdf}
+                </a>
+                <a
+                  href={purchaseResult.printUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-white px-4 text-sm font-black text-emerald-800 ring-1 ring-emerald-300 transition hover:bg-emerald-100"
+                >
+                  <Printer size={17} aria-hidden="true" />
+                  {copy.printPdf}
+                </a>
+                <button
+                  type="button"
+                  onClick={() => setPurchaseResult(null)}
+                  className="inline-flex h-11 items-center justify-center gap-2 rounded-xl px-4 text-sm font-black text-emerald-800 transition hover:bg-emerald-100"
+                >
+                  <RefreshCw size={16} aria-hidden="true" />
+                  {copy.buyAnother}
+                </button>
+              </div>
+            </div>
+          ) : session ? (
             <>
               <div className="mt-5 rounded-2xl bg-emerald-50 p-4">
                 <p className="flex items-center gap-2 text-sm font-black text-emerald-900">
@@ -379,12 +495,41 @@ export function TicketDesk({
                   {session.email}
                 </p>
               </div>
-              <p className="mt-4 flex items-start gap-2 rounded-2xl border border-blue-100 bg-blue-50 p-3.5 text-xs font-bold leading-5 text-blue-900">
-                <Clock3
-                  size={16}
-                  className="mt-0.5 shrink-0 text-blue-600"
-                  aria-hidden="true"
-                />
+              <div className="mt-4 overflow-hidden rounded-2xl bg-[linear-gradient(135deg,#10172a,#2457ff)] p-4 text-white shadow-lg shadow-blue-950/15">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-[10px] font-black uppercase tracking-[0.14em] text-blue-100">
+                      {copy.paymentOptions}
+                    </p>
+                    <p className="mt-4 font-mono text-xl font-black tracking-[0.16em]">
+                      •••• 4242
+                    </p>
+                  </div>
+                  <WalletCards size={24} aria-hidden="true" />
+                </div>
+                <div className="mt-4 flex items-end justify-between gap-3 text-xs">
+                  <span className="truncate font-bold uppercase">
+                    {session.name}
+                  </span>
+                  <span className="shrink-0 rounded-md bg-white/15 px-2 py-1 font-black">
+                    DEMO
+                  </span>
+                </div>
+              </div>
+              <div className="mt-3 rounded-2xl border border-amber-200 bg-amber-50 p-3.5">
+                <p className="flex items-center gap-2 text-xs font-black text-amber-950">
+                  <ShieldCheck
+                    size={16}
+                    className="shrink-0 text-amber-700"
+                    aria-hidden="true"
+                  />
+                  {copy.demoNoticeTitle}
+                </p>
+                <p className="mt-2 text-[11px] leading-5 text-amber-900">
+                  {copy.demoNotice}
+                </p>
+              </div>
+              <p className="mt-3 text-xs font-bold leading-5 text-slate-600">
                 {copy.reservationWindow}
               </p>
               <button
@@ -399,23 +544,15 @@ export function TicketDesk({
                 ) : (
                   <CreditCard size={18} />
                 )}
-                {isBuying ? copy.redirecting : copy.checkout}
+                {isBuying
+                  ? copy.processing
+                  : `${copy.payDemo} · ${selectedPrice}`}
               </button>
-              <div className="mt-3 rounded-2xl border border-slate-200 bg-slate-50 p-3.5">
-                <p className="flex items-center justify-center gap-2 text-xs font-black text-slate-700">
-                  <WalletCards
-                    size={16}
-                    className="text-blue-600"
-                    aria-hidden="true"
-                  />
-                  {copy.paymentOptions}
-                </p>
-                <p className="mt-2 text-center text-[11px] leading-4 text-slate-500">
-                  {copy.walletHint}
-                </p>
-              </div>
               <p className="mt-3 text-center text-xs font-bold text-slate-500">
                 {copy.processedBy}
+              </p>
+              <p className="mt-1 text-center text-[11px] text-slate-400">
+                {copy.walletHint}
               </p>
               <p className="mt-2 text-center text-[11px] leading-5 text-slate-500">
                 {copy.agreementStart}{" "}

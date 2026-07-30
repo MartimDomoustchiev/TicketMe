@@ -18,7 +18,6 @@ import {
   updateTicketStorage,
 } from "@/lib/store";
 import { storeTicketPdf } from "@/lib/storage";
-import { isStripeConfigured } from "@/lib/stripe";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -26,6 +25,9 @@ export const dynamic = "force-dynamic";
 type PurchaseBody = {
   eventId?: unknown;
   ticketType?: unknown;
+  locale?: unknown;
+  paymentMode?: unknown;
+  demoConfirmed?: unknown;
 };
 
 export async function POST(request: Request) {
@@ -36,13 +38,18 @@ export async function POST(request: Request) {
     );
   }
 
-  if (isStripeConfigured() || process.env.NODE_ENV === "production") {
+  const body = (await request.json().catch(() => null)) as PurchaseBody | null;
+  const locale = body?.locale === "en" ? "en" : "bg";
+  const english = locale === "en";
+
+  if (body?.paymentMode !== "demo" || body.demoConfirmed !== true) {
     return Response.json(
       {
-        error:
-          "Direct ticket issuing is disabled. Continue through secure checkout.",
+        error: english
+          ? "Confirm the demo payment before issuing the ticket."
+          : "Потвърди демо плащането, преди да издадем билета.",
       },
-      { status: 410 },
+      { status: 400 },
     );
   }
 
@@ -54,7 +61,11 @@ export async function POST(request: Request) {
 
   if (!rateLimit.allowed) {
     return Response.json(
-      { error: "Твърде много заявки. Опитай отново след малко." },
+      {
+        error: english
+          ? "Too many requests. Please try again shortly."
+          : "Твърде много заявки. Опитай отново след малко.",
+      },
       {
         status: 429,
         headers: { "Retry-After": String(rateLimit.retryAfterSeconds) },
@@ -66,12 +77,15 @@ export async function POST(request: Request) {
 
   if (!session) {
     return Response.json(
-      { error: "Първо потвърди имейла си." },
+      {
+        error: english
+          ? "Verify your email before purchasing."
+          : "Първо потвърди имейла си.",
+      },
       { status: 401 },
     );
   }
 
-  const body = (await request.json().catch(() => null)) as PurchaseBody | null;
   const eventId = typeof body?.eventId === "string" ? body.eventId : "";
   const ticketType = body?.ticketType;
   const event = getEventById(eventId);
@@ -82,14 +96,25 @@ export async function POST(request: Request) {
     !isTicketTypeId(ticketType)
   ) {
     return Response.json(
-      { error: "Събитието вече не е достъпно." },
+      {
+        error: english
+          ? "This event is no longer available."
+          : "Събитието вече не е достъпно.",
+      },
       { status: 404 },
     );
   }
 
-  if (!event.ticketTypes.some((type) => type.id === ticketType)) {
+  const selectedTicketType = event.ticketTypes.find(
+    (type) => type.id === ticketType,
+  );
+  if (!selectedTicketType) {
     return Response.json(
-      { error: "Избери валидна категория билет." },
+      {
+        error: english
+          ? "Choose a valid ticket category."
+          : "Избери валидна категория билет.",
+      },
       { status: 400 },
     );
   }
@@ -123,6 +148,7 @@ export async function POST(request: Request) {
       pdf = await createTicketPdf({
         ticket,
         verificationUrl,
+        locale,
       });
       const storage = await storeTicketPdf({
         id: ticket.id,
@@ -152,6 +178,7 @@ export async function POST(request: Request) {
         eventName: event.name,
         downloadUrl: storedTicket.storageUrl,
         pdf,
+        locale,
       });
     } catch (error) {
       emailDelivered = false;
@@ -160,10 +187,18 @@ export async function POST(request: Request) {
 
     return Response.json({
       ok: true,
+      payment: {
+        mode: "demo",
+        reference: `DEMO-${randomBytes(8).toString("hex").toUpperCase()}`,
+        charged: false,
+        amount: selectedTicketType.price,
+        currency: selectedTicketType.currency,
+      },
       queuePosition: position,
       ticketId: storedTicket.id,
-      ticketUrl: `/tickets/${storedTicket.id}`,
+      ticketUrl: `/${locale}/tickets/${storedTicket.id}`,
       downloadUrl: storedTicket.storageUrl,
+      printUrl: `${storedTicket.storageUrl}?print=1`,
       emailDelivered,
     });
   } catch (error) {
@@ -171,7 +206,11 @@ export async function POST(request: Request) {
 
     if (message === "SOLD_OUT") {
       return Response.json(
-        { error: "Тази категория вече е изчерпана." },
+        {
+          error: english
+            ? "This ticket category has just sold out."
+            : "Тази категория вече е изчерпана.",
+        },
         { status: 409 },
       );
     }
@@ -183,8 +222,9 @@ export async function POST(request: Request) {
     ) {
       return Response.json(
         {
-          error:
-            "В момента има много заявки. Моля, опитай отново след няколко секунди.",
+          error: english
+            ? "Demand is high right now. Please try again in a few seconds."
+            : "В момента има много заявки. Моля, опитай отново след няколко секунди.",
         },
         {
           status: 503,
@@ -195,7 +235,11 @@ export async function POST(request: Request) {
 
     console.error(error);
     return Response.json(
-      { error: "Не успяхме да издадем билет. Опитай пак след малко." },
+      {
+        error: english
+          ? "We could not issue the ticket. Please try again shortly."
+          : "Не успяхме да издадем билет. Опитай пак след малко.",
+      },
       { status: 500 },
     );
   }

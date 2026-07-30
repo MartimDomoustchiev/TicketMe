@@ -6,7 +6,7 @@ production-oriented архитектура. Интерфейсът е локал
 
 Началният snapshot съдържа **126 source listings**: 125 публични записа от
 Bilet.bg и едно featured събитие от Eventim, плюс едно изрично first-party
-TicketMe събитие с реален локален inventory и Stripe Checkout. Изтеклите
+TicketMe събитие с реален локален inventory и on-site demo checkout. Изтеклите
 записи автоматично отпадат от публичния каталог. Към него могат да се добавят
 публикувани записи от постоянния discovery каталог в PostgreSQL. Всеки активен
 запис има собствена страница; външно откритите събития водят към оригиналния
@@ -19,8 +19,8 @@ Snapshot-ът е нормализиран от публичния календа
 > [!IMPORTANT]
 > Публичните listings са discovery записи, а не TicketMe inventory. Live
 > checkout се активира само за събития с изрично организаторско право,
-> договорена наличност, завършено Stripe onboarding и production webhook.
-> Използвай test keys и Stripe test cards единствено в local/staging среда.
+> договорена наличност и настроени PDF/email/storage интеграции. Демо
+> плащането не събира картови данни и никога не таксува реални средства.
 
 ## Какво е реализирано
 
@@ -36,10 +36,12 @@ Snapshot-ът е нормализиран от публичния календа
 - Единна email/password login страница за клиенти и администратори.
 - Професионална регистрация с password strength, email verification и
   отделни роли в базата.
-- Hosted Stripe Checkout само за потребители с потвърден имейл.
-- 30-минутна inventory reservation с автоматично освобождаване при изтекъл
-  Checkout Session.
-- Idempotent Stripe webhook fulfillment и success-page recovery path.
+- On-site демо плащане само за потребители с потвърден имейл, без
+  пренасочване и без събиране на реални картови данни.
+- Атомарно издаване през FIFO опашката; при грешка в PDF/storage стъпката
+  inventory се възстановява.
+- Опционалната Stripe Checkout интеграция остава отделен bonus path, но не е
+  активният customer flow.
 - Ticket-category модел с отделен капацитет и цена за organizer-owned
   събития; source-only listings нямат локален inventory.
 - Уникален PDF дизайн според събитието и билета, с купувач, категория,
@@ -65,9 +67,9 @@ Snapshot-ът е нормализиран от публичния календа
 | Изискване | Реализация |
 | --- | --- |
 | Лендинг страница | `/bg` и `/en` показват featured събитие, категории и селекции от каталога. |
-| Два езика | Locale routing, switcher, localized metadata, UI, email/PDF и Stripe Checkout locale. |
+| Два езика | Locale routing, switcher, localized metadata, UI, on-site checkout, email и PDF съдържание. |
 | Email verification | 30-минутен еднократен hashed token; билет може да заяви само потвърден профил. |
-| Stripe плащане | Server-created hosted Checkout Session; fulfillment само след verified Stripe event или server-side success fallback. |
+| Симулация на плащане | Ясно означен on-site demo checkout без картови полета или реално таксуване; билетът се издава в същия flow. |
 | PDF билет | `pdf-lib` генерира PDF с име, данни за събитието, категория, admission label и QR код. |
 | Cloud storage | В production PDF-ите се записват в private Cloudflare R2 или AWS S3 bucket. |
 | Email доставка | Resend изпраща PDF attachment и защитен линк за изтегляне. |
@@ -75,13 +77,13 @@ Snapshot-ът е нормализиран от публичния календа
 | Live наличности | Event-scoped SSE stream изпраща inventory, queue depth и активни Checkout-и към всички отворени клиенти. |
 | Честна опашка | PostgreSQL `purchase_queue` подрежда reservation заявките по `BIGSERIAL` позиция за всяка event/category lane. |
 | Без oversell | Guarded inventory decrement и reservation insert са в една PostgreSQL транзакция под advisory и row lock. |
-| Натоварване | Кратката DB транзакция пази наличността; Stripe, PDF, storage и email I/O са извън allocation critical section. |
+| Натоварване | Кратката DB транзакция пази наличността; PDF, storage и email I/O са извън allocation critical section. |
 | Добра архитектура | UI, route handlers, domain services и provider adapters са разделени по отговорности. |
 | Сигурност | Scrypt password hashes, opaque server-side sessions, authorization, rate limiting, parameterized SQL и security headers. |
-| Deploy | Next.js приложението се deploy-ва във Vercel; PostgreSQL, Resend, Stripe и private S3/R2 остават зад readiness gates. |
+| Deploy | Next.js приложението се deploy-ва във Vercel; PostgreSQL, Resend и private S3/R2 остават зад readiness gates. |
 | Актуален каталог | Daily/monthly scheduler чете само разрешени feeds, deduplicate-ва записите и ги подава към admin review или доверено auto-publish. |
 
-Бонусите с реална Stripe Checkout интеграция, билетни категории, multi-event
+Бонусите с опционална Stripe Checkout интеграция, билетни категории, multi-event
 каталог, admin панел и QR верификация също са реализирани. Избор на конкретно
 място от карта на зала не е част от тази версия.
 
@@ -91,7 +93,8 @@ Snapshot-ът е нормализиран от публичния календа
 - Tailwind CSS 4
 - PostgreSQL чрез `postgres`
 - Node.js `scrypt` за salted password hashing и SHA-256 за opaque tokens
-- Stripe Node SDK и hosted Stripe Checkout
+- On-site demo checkout без реални payment credentials
+- Опционален Stripe Node SDK и hosted Checkout bonus path
 - Server-Sent Events за live inventory
 - `pdf-lib`, `@pdf-lib/fontkit` и Noto Sans за PDF с кирилица
 - `qrcode` за входен QR код
@@ -112,7 +115,7 @@ Browser
   ├─ Next.js pages / route handlers
   ├─ SSE availability stream
   ├─ opaque HttpOnly session cookie
-  └─ redirect ─────────────────────► Stripe-hosted Checkout
+  └─ on-site demo payment
           │
           ▼
 Domain services
@@ -122,7 +125,7 @@ Domain services
   ├─ licensed-feed discovery + validation + deduplication
   ├─ optional Gemini enrichment ─────► Gemini 3.5 Flash-Lite
   ├─ organizer review / trusted auto-publish
-  ├─ Stripe webhook fulfillment
+  ├─ optional Stripe webhook fulfillment
   ├─ PDF + QR generation
   ├─ email adapter ─────────► Resend
   └─ storage adapter ───────► Cloudflare R2 / AWS S3
@@ -147,45 +150,30 @@ Switcher-ът в header-а сменя locale-а, като запазва тек�
 API routes и static/metadata assets остават без prefix. Sitemap-ът публикува и
 двата езика с language alternates.
 
-### Stripe Checkout и ticket fulfillment
+### On-site demo payment и ticket fulfillment
 
-1. `POST /api/stripe/checkout` изисква buyer сесия с потвърден имейл,
-   проверява same-origin заявката, валидира `eventId`, категорията и locale-а
-   и прилага rate limit.
-2. Production заявката влиза директно в постоянната PostgreSQL FIFO lane за
+1. Потвърденият buyer избира категория и вижда ясно означена `TicketMe Demo
+   Card` в самата event страница. Няма картови input полета и не се изпращат
+   payment credentials към приложението или трета страна.
+2. `POST /api/purchase` приема само same-origin заявка с изрично
+   `paymentMode: "demo"` потвърждение, валидира сесията, `eventId`,
+   категорията и locale-а и прилага rate limit.
+3. Production заявката влиза в постоянната PostgreSQL FIFO lane за
    `eventId:ticketType`. Само най-малката активна `BIGSERIAL` позиция може
-   атомарно да намали inventory и да създаде checkout reservation.
-3. Сървърът създава 30-минутен Stripe Checkout Session с reservation ID в
-   metadata и връща hosted `checkoutUrl`. Browser-ът прави redirect към Stripe;
-   не зарежда Stripe.js и не се нуждае от publishable key.
-4. Stripe изпраща `checkout.session.completed` към webhook route-а. След
-   проверка на webhook signature приложението изпълнява една idempotent
-   транзакция, която превръща reservation-а в точно един билет. Уникалните
-   reservation, Checkout Session и PaymentIntent връзки правят повторно или
-   разместено събитие безопасно.
-5. Генерират се QR и локализиран PDF, файлът се качва в private object storage,
-   а Resend изпраща локализиран email. Delivery claim/lease позволява безопасен
-   retry, без да се създава втори билет.
-6. При `checkout.session.expired` активната reservation се освобождава
-   idempotently и билетът се връща в наличността. Изтеклите локални reservations
-   също се почистват при inventory операции, така че пропуснат webhook не може
-   да заключи билет завинаги. При отказ cancelled страницата първо заявява
-   изтичане на Stripe Session-а и след това възстановява inventory.
-7. `/{locale}/checkout/success?session_id=...` проверява Checkout Session-а
-   server-side. Ако webhook-ът се забави, страницата извиква същия idempotent
-   fulfillment path; ако webhook-ът вече е приключил, показва съществуващия
-   билет.
+   атомарно да намали inventory и да издаде билет, така че няма oversell.
+4. След успешната allocation стъпка се генерират уникален QR и локализиран
+   PDF, файлът се качва в private object storage, а Resend изпраща email с
+   attachment и защитен download URL.
+5. Success състоянието остава на същата страница и дава бутони за детайли,
+   PDF download и отваряне на PDF в browser viewer за печат.
+6. Ако PDF или storage стъпката се провали, издаденият запис се rollback-ва и
+   inventory се възстановява. Email failure не скрива готовия билет — той
+   остава достъпен в профила.
 
-Stripe Checkout Session-ът и нормалният inventory hold са 30 минути.
-`checkout.session.expired` освобождава reservation-а веднага след този
-прозорец. Persistence expiry е 35 минути — петминутен failsafe grace при
-закъснял или пропуснат webhook — и `getAvailability`/следваща allocation
-почистват такъв hold. FIFO requester lease-ът, polling backoff-ът и
-30-секундният queue timeout са отделни от Checkout reservation срока.
-
-В local JSON режим същият reservation/fulfillment договор се изпълнява от
-in-process FIFO lane и file mutation lock. В production `DATABASE_URL` е
-задължителен.
+В local JSON режим същият договор се сериализира от in-process FIFO lane и
+file mutation lock. В production `DATABASE_URL` е задължителен. Съществуващите
+Stripe routes остават като изолиран bonus implementation, но активният UI не
+ги извиква и не напуска TicketMe.
 
 ### Realtime наличности
 
@@ -356,40 +344,25 @@ npm run db:migrate
 
 ## Избор на външни услуги
 
-### Payments: Stripe hosted Checkout
+### Payments: on-site demo checkout
 
-Избран е Stripe-hosted Checkout, защото чувствителните payment полета се
-показват на Stripe domain, поддържат locale и mobile UX и оставят приложението
-да работи с server-created Checkout Sessions и подписани webhooks. Payment
-Element би дал повече visual control, но изисква Stripe.js, publishable key и
-по-голяма client integration повърхност.
+За активния school-project flow е избрано симулирано плащане в TicketMe.
+Потребителят остава на event страницата, вижда фиксирана demo карта `••••
+4242` и издава тестов билет с един бутон. Няма форма за номер на карта, CVC,
+expiry или адрес, няма реално таксуване и приложението не се представя като
+лицензиран payment processor.
 
-Checkout е ограничен до незабавно потвърждаваните card rails. Stripe третира
-Apple Pay и Google Pay като card wallets и ги показва, когато са активирани и
-browser-ът, устройството, държавата и настроеният wallet са допустими.
-Забавените банкови методи нарочно са изключени, защото могат да приключат след
-35-минутната резервация. Wallet плащанията минават през същото server-side
-amount, currency, metadata и fulfillment валидиране като обикновена карта.
-Всяка Checkout Session override-ва тестовото account име с публичния бранд
-`TicketMe` и използва същите цветове и типография като marketplace UI.
-Stripe запазва видима `Sandbox` индикация при test-mode сесии; тя изчезва
-единствено при реална live-mode Checkout Session.
-
-Тази архитектура **не изисква client publishable key**. Единствените Stripe
-стойности са server-only `STRIPE_SECRET_KEY` и отделен
-`STRIPE_WEBHOOK_SECRET`. Не добавяй `NEXT_PUBLIC_STRIPE_*` променлива, не
-записвай ключове в кода и никога не ги commit-вай.
-
-За local и staging проверки използвай единствено Stripe sandbox/test mode.
-Никога не въвеждай ръчно реални картови данни в Checkout; за картовата форма
-използвай Stripe test cards. Показването на Apple Pay или Google Pay може да
-изисква вече настроена карта в съответния wallet, но `sk_test_...` запазва
-транзакцията в Stripe test mode.
+Този избор покрива изрично разрешеното в условието симулиране на продажба,
+като запазва трудните части на задачата реални: verified email, FIFO,
+transactional inventory, PDF/QR, private storage, email delivery, download и
+print flow. Stripe-hosted Checkout и подписаният webhook остават в codebase-а
+като bonus/reference implementation и могат да се активират отново след
+merchant onboarding, но не се използват от текущия customer UI.
 
 Source snapshot-ът съдържа legacy цени в BGN. При нормализиране на каталога те
 се конвертират еднократно в EUR по официалния фиксиран курс
-`1 EUR = 1.95583 BGN`, закръглени до евроцент. UI, metadata, Stripe Checkout,
-fulfillment проверките и PDF билетите използват една и съща EUR стойност.
+`1 EUR = 1.95583 BGN`, закръглени до евроцент. UI, metadata, demo receipt и
+PDF билетите използват една и съща EUR стойност.
 
 ### Email: Resend
 
@@ -425,35 +398,8 @@ npm ci
 cp .env.example .env.local
 ```
 
-За най-краткия локален checkout flow добави собствен Stripe **test-mode**
-secret key в `STRIPE_SECRET_KEY`. Това е достатъчно, за да се отвори hosted
-Checkout и success страницата да провери плащането и да издаде билета.
-Publishable `pk_test_...` key не се използва, защото картовата форма е на
-Stripe.
-
-В Stripe sandbox включи Card, Apple Pay и Google Pay в default payment-method
-configuration. Hosted Checkout не изисква wallet SDK в приложението. Wallet
-бутонът се вижда само когато методът е активиран и устройството, browser-ът,
-държавата и настроеният Apple Wallet или Google Wallet са допустими; при
-останалите устройства Stripe показва картовата форма.
-
-В test-mode средата Stripe Link е изключен, за да не конкурира
-Apple Pay/Google Pay и да не показва legacy sandbox account името в текста за
-запазване на платежни данни. Преди повторно включване на Link промени
-customer-facing Business name на `TicketMe` от Stripe Dashboard →
-Settings → Business details.
-
-`STRIPE_WEBHOOK_SECRET` не е задължителен за този локален happy path. За
-тестване на надеждния асинхронен production flow инсталирай и authenticate-ни
-Stripe CLI, след което стартирай webhook forwarding в отделен terminal:
-
-```bash
-stripe listen --forward-to localhost:3000/api/stripe/webhook
-```
-
-CLI извежда отделен webhook signing secret. Запиши го в
-`STRIPE_WEBHOOK_SECRET` в `.env.local`, без да го commit-ваш. Независимо кой
-локален режим избираш, стартирай приложението:
+On-site demo checkout-ът не изисква Stripe key или друга payment
+конфигурация. Стартирай приложението:
 
 ```bash
 npm run dev
@@ -470,8 +416,8 @@ development. Приложението ще използва:
 - `.data/storage/tickets` за PDF файловете;
 - `.data/outbox.log` за email съдържанието.
 
-Без `STRIPE_SECRET_KEY` сайтът и authentication flow-ът могат да се разглеждат,
-но Checkout endpoint-ът fail-ва безопасно с `503`.
+`STRIPE_SECRET_KEY` и `STRIPE_WEBHOOK_SECRET` са нужни само ако разработваш
+отделния bonus Stripe path. Основният demo checkout не ги чете.
 
 Създай профил с име, email и парола. Когато Resend не е конфигуриран,
 регистрацията отваря директно страницата за локално потвърждение и ясно
@@ -514,7 +460,7 @@ npm run user:promote -- your-email@example.com
 PostgreSQL през `DATABASE_URL`, когато той е конфигуриран. След промяната
 излез и влез отново през същата `/login` форма.
 
-### Stripe test-card flow
+### On-site demo purchase flow
 
 1. Отвори `/bg/events`, провери търсене, filters и locale switcher-а към
    `/en/events`.
@@ -522,20 +468,17 @@ PostgreSQL през `DATABASE_URL`, когато той е конфигурир�
 3. В локален режим продължи през автоматично отворената verification страница;
    при конфигуриран Resend отвори линка от получения email. Потвърждението
    създава сесия.
-4. Избери категория; приложението резервира един билет и пренасочва към
-   Stripe-hosted Checkout.
-5. В Stripe sandbox формата използвай test card `4242 4242 4242 4242`,
-   произволна бъдеща дата, произволен трицифрен CVC и тестов пощенски код.
-   Никога не въвеждай ръчно реална карта. За wallet тест отвори същия Checkout
-   на съвместимо устройство/browser с вече настроен Apple Wallet или Google
-   Wallet; `sk_test_...` гарантира, че плащането остава в test mode.
-6. Провери, че Stripe CLI получава `checkout.session.completed`, success
-   страницата води към точно един билет, PDF download-ът работи и ticket
-   email-ът е в outbox файла.
-7. Повтори webhook event-а и провери, че не се създава втори билет.
-8. За неплатена Session провери, че `checkout.session.expired` освобождава
-   reservation-а и live наличността се увеличава.
-9. Дай admin роля с `npm run user:promote -- <email>`, влез със същия email и
+4. Избери категория. Checkout картата остава в event страницата и показва
+   фиксираната `TicketMe Demo Card` с последни цифри `4242`. Няма полета за
+   реална карта и не трябва да се въвеждат payment credentials.
+5. Натисни „Плати демо“. Приложението подрежда заявката във FIFO опашката,
+   намалява наличността транзакционно и издава билета, без redirect към
+   външен сайт.
+6. Провери success състоянието в същия панел, ticket detail страницата, PDF
+   download-а, print варианта, ticket email-а и live промяната на наличността.
+7. Повтори flow-а за различни категории и провери, че всяка успешна заявка
+   получава уникален билет и admission label.
+8. Дай admin роля с `npm run user:promote -- <email>`, влез със същия email и
    парола, отвори `/bg/admin` или `/en/admin`, сканирай QR URL и потвърди, че
    втори check-in се отхвърля.
 
@@ -552,8 +495,8 @@ PostgreSQL през `DATABASE_URL`, когато той е конфигурир�
 | `DATABASE_POOL_MAX` | не | Shared pool limit; default `5`, максимум `20`. |
 | `MIGRATION_DATABASE_URL` | не | Отделен admin/migration connection URL; fallback към normal DB config. |
 | `DATABASE_AUTO_MIGRATE` | production: винаги `false` | Development-only runtime DDL escape hatch. |
-| `STRIPE_SECRET_KEY` | задължителна | Server-only Stripe secret key; за local/staging използвай test-mode key. |
-| `STRIPE_WEBHOOK_SECRET` | production: задължителна; local happy path: не | Отделен server-only signing secret за надеждно асинхронно fulfillment. |
+| `STRIPE_SECRET_KEY` | опционална bonus интеграция | Server-only Stripe secret key; не се използва от основния demo checkout. |
+| `STRIPE_WEBHOOK_SECRET` | опционална bonus интеграция | Signing secret за отделния Stripe webhook flow. |
 | `RESEND_API_KEY` | задължителна | Resend API credential. |
 | `MAIL_FROM` | задължителна | Sender от верифициран домейн. |
 | `S3_BUCKET` | задължителна | Private bucket за PDF билетите. |
@@ -571,8 +514,8 @@ PostgreSQL през `DATABASE_URL`, когато той е конфигурир�
 | `GEMINI_API_KEY` | опционална и само при допустим deployment | Server-only enrichment key; празна стойност включва deterministic fallback. |
 
 Нито една secret стойност не трябва да започва с `NEXT_PUBLIC_`, да се commit-ва
-в Git или да се споделя в screenshots. Hosted Checkout не използва
-`NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY`.
+в Git или да се споделя в screenshots. Основният demo checkout не изисква
+Stripe ключове и няма browser-visible payment secret.
 
 ## Routes и API
 
@@ -583,12 +526,12 @@ PostgreSQL през `DATABASE_URL`, когато той е конфигурир�
 | `/` | `307` locale detection redirect към `/bg` или `/en`. |
 | `/{locale}` | Marketplace landing page; `locale` е `bg` или `en`. |
 | `/{locale}/events` | Търсене, filters, sorting и pagination на каталога. |
-| `/{locale}/events/[slug]` | Event details, live availability и Stripe Checkout начало. |
+| `/{locale}/events/[slug]` | Event details, live availability и on-site demo purchase. |
 | `/{locale}/login` | Единен email/password вход и професионална регистрация за всички роли. |
 | `/{locale}/signup` | Пренасочва към registration режима на единния auth portal. |
 | `/{locale}/verify` | Потвърждение от потребителя преди активиране на email token-а. |
-| `/{locale}/checkout/success` | Server-verified paid-session success и fulfillment fallback. |
-| `/{locale}/checkout/cancelled` | Освобождава отказаната reservation и връща към събитието. |
+| `/{locale}/checkout/success` | Success/fallback страница за опционалния Stripe bonus flow. |
+| `/{locale}/checkout/cancelled` | Cancellation страница за опционалния Stripe bonus flow. |
 | `/{locale}/account/tickets` | Билетите на текущия потвърден потребител. |
 | `/{locale}/tickets/[id]` | Защитен преглед на конкретен билет. |
 | `/{locale}/admin` | Защитен order dashboard. |
@@ -606,12 +549,12 @@ PostgreSQL през `DATABASE_URL`, когато той е конфигурир�
 | `GET /api/verify/confirm` | Compatibility redirect към безопасната confirmation страница; не променя state. |
 | `POST /api/verify/confirm` | Консумира еднократен hashed token, потвърждава профила и създава session. |
 | `GET /api/event?eventId=...` | Event payload, текуща наличност и purchase activity. |
-| `GET /api/events?eventId=...` | Event-scoped SSE stream за inventory, queue и активни Checkout-и. |
-| `POST /api/stripe/checkout` | Създава FIFO reservation и hosted Stripe Checkout Session. |
-| `POST /api/stripe/webhook` | Verified, idempotent completion/expiry обработка. |
-| `POST /api/stripe/cancel` | Buyer-owned cancellation и незабавно освобождаване на reservation. |
-| `POST /api/purchase` | Legacy local route; връща `410` при Stripe config и винаги в production. |
-| `GET /api/tickets/[id]/download` | Authorized private PDF download. |
+| `GET /api/events?eventId=...` | Event-scoped SSE stream за inventory, queue и активни покупки. |
+| `POST /api/purchase` | Same-origin on-site demo purchase: FIFO allocation, PDF, storage и email delivery. |
+| `POST /api/stripe/checkout` | Опционален bonus flow: FIFO reservation и hosted Stripe Checkout Session. |
+| `POST /api/stripe/webhook` | Опционален bonus flow: verified, idempotent completion/expiry обработка. |
+| `POST /api/stripe/cancel` | Опционален bonus flow: buyer-owned cancellation на reservation. |
+| `GET /api/tickets/[id]/download` | Authorized private PDF download; `?print=1` отваря inline print вариант. |
 | `GET /api/tickets/[id]/verify` | Насочва admin към check-in confirmation; не променя state. |
 | `POST /api/tickets/[id]/verify` | Еднократен, admin-only check-in. |
 | `POST /api/admin/session` | Compatibility alias към единния session handler. |
@@ -638,17 +581,19 @@ PostgreSQL през `DATABASE_URL`, когато той е конфигурир�
 - Credential verification използва constant-time comparison и dummy scrypt
   работа при несъществуващ email, за да намали timing разликите.
 - Ticket page и PDF download проверяват buyer ownership или admin role.
-- Stripe secret key и webhook secret се четат само от server environment;
-  картовите полета са изцяло в Stripe-hosted Checkout.
-- Checkout creation проверява buyer session, same-origin заявка и
-  server-side event/price/currency данни.
-- Webhook-ът валидира raw payload-а със Stripe signature преди mutation.
-- Fulfillment проверява paid status, amount, currency, reservation, event и
-  ticket category и е защитен с DB locks и unique constraints.
+- Основният demo checkout не събира картови данни, не приема свободно въведени
+  payment credentials и никога не извършва реално таксуване.
+- Demo purchase endpoint-ът изисква потвърдена buyer session, same-origin
+  заявка, изрично demo потвърждение и server-side event/category validation.
+- FIFO allocation-ът и inventory update-ът са защитени с PostgreSQL
+  transaction/locks; PDF или storage грешка връща издадения билет и
+  наличността.
+- Опционалните Stripe routes пазят secret key-овете само в server environment,
+  валидират signed webhook payload-а и не се използват от активния event UI.
 - QR `GET` не извършва mutation; check-in изисква admin `POST`, правилна secret
   стойност и статус `issued`.
 - User-controlled SQL values минават през parameterized tagged templates.
-- Signup, login, verification, Checkout и cancellation routes имат rate
+- Signup, login, verification, purchase, Checkout и cancellation routes имат rate
   limits и state-changing auth routes проверяват same-origin.
 - HTML в email-ите се escape-ва, а open redirects се ограничават до локални
   paths.
@@ -664,8 +609,9 @@ PostgreSQL през `DATABASE_URL`, когато той е конфигурир�
   32-знаков Bearer secret, constant-time verification и PostgreSQL advisory
   lock; organizer review е same-origin и role protected.
 - Production health/readiness fail closed, ако липсват database, verified
-  custom-domain email, storage, Stripe live-mode или webhook настройки, ако
-  PostgreSQL TLS не е активен, или ако public URL-ът не е външен HTTPS origin.
+  custom-domain email или storage, ако PostgreSQL TLS не е активен, или ако
+  public URL-ът не е външен HTTPS origin. Stripe readiness е информационна,
+  защото active payment mode е `demo`.
 
 Вграденият rate limiter е process-local. При голям multi-instance deployment
 трябва да бъде заменен или допълнен с edge/WAF rate limiting или shared Redis
@@ -691,30 +637,25 @@ curl -i http://localhost:3000/api/health
 `npm run check` изпълнява ESLint, automated tests и production build с
 TypeScript проверка. Production `/api/health` връща `503 degraded`, ако
 PostgreSQL/TLS не е достъпен или липсва задължителна public HTTPS URL,
-custom-domain Resend sender, S3/R2, Stripe live secret или webhook
-конфигурация. Health route-ът не извършва тестово плащане.
+custom-domain Resend sender или S3/R2 конфигурация. Stripe статусът е
+опционален diagnostic и не блокира demo readiness. Health route-ът не
+извършва тестово плащане.
 
-За integration/load test използвай отделна staging database, Stripe test mode
-и валидна buyer session. Никога не пускай автоматизиран тест срещу live mode.
-Acceptance условията са:
+За integration/load test използвай отделна staging database и валидна buyer
+session. Demo flow-ът не изисква payment provider. Acceptance условията са:
 
-- броят активни reservations плюс издадени билети никога не надвишава
-  началната наличност;
+- броят издадени билети никога не надвишава началната наличност;
 - всяка успешна заявка има уникален ticket ID и admission label;
-- паралелните reservation заявки се обслужват по FIFO position;
-- повторен `checkout.session.completed` и race между webhook/success page
-  създават точно един билет и една delivery;
-- `checkout.session.expired`, failure и cancellation връщат inventory точно
-  веднъж;
-- SSE клиентите виждат reservation, fulfillment и release промените без
-  refresh;
+- паралелните demo purchase заявки се обслужват по FIFO position;
+- PDF/storage failure връща inventory точно веднъж;
+- SSE клиентите виждат purchase и inventory промените без refresh;
 - изоставен queue request или delivery worker не блокира lane-а след lease
   timeout.
 
 За реален release добави automated integration тестове срещу disposable
 PostgreSQL и object storage, browser E2E тестове за login/checkout/admin и
-периодичен load test със k6 или Artillery. Stripe сценарии се изпълняват само
-с test events и test cards.
+периодичен load test със k6 или Artillery. Опционалните Stripe сценарии се
+изпълняват отделно и само с test events и test cards.
 
 ## Production deploy
 
@@ -722,8 +663,8 @@ PostgreSQL и object storage, browser E2E тестове за login/checkout/adm
 
 - **Vercel** — Next.js приложението, custom domain и daily Cron trigger;
 - **AWS RDS PostgreSQL** — users, sessions, inventory и durable FIFO queue;
-- **Stripe Checkout live mode** — само след merchant onboarding, organizer
-  authorization и signed production webhook;
+- **On-site demo payment** — active school-project flow без реално таксуване;
+- **Stripe Checkout** — изолиран bonus flow, който не е нужен за active UI;
 - **Resend** — verification и ticket email от верифициран TicketMe domain;
 - **AWS S3 или Cloudflare R2** — private PDF storage.
 
@@ -744,20 +685,18 @@ cookies, webhook-и и payment callbacks. За пълен Cloudflare/OpenNext bu
    `npm run db:migrate`.
 4. Верифицирай sending domain в Resend.
 5. Създай private R2 bucket и API token с object read/write права само за него.
-6. За staging създай test webhook, а за production — отделен live webhook
-   `https://<domain>/api/stripe/webhook` за `checkout.session.completed`,
-   `checkout.session.expired`, `checkout.session.async_payment_succeeded` и
-   `checkout.session.async_payment_failed`.
-7. Добави правилния environment-specific `STRIPE_SECRET_KEY`, отделния
-   endpoint `STRIPE_WEBHOOK_SECRET` и останалите variables от `.env.example`
-   във Vercel. Никога не commit-вай стойностите.
+6. Добави задължителните database, email, storage и public URL variables от
+   `.env.example` във Vercel. Никога не commit-вай стойностите.
+7. Ако демонстрираш отделния Stripe bonus flow, използвай само test-mode key
+   и test webhook. Това не е част от основния on-site demo checkout.
 8. Използвай `npm run build` за build command и `npm start` за start command,
    deploy-ни и отвори `/api/health`.
 9. Регистрирай и потвърди organizer профил, после изпълни
    `npm run user:promote -- organizer@example.com` в среда със същия
    `DATABASE_URL`.
-10. Провери двата locale-а и целия acceptance flow с реален email адрес,
-   Stripe test card и public staging domain. Не използвай реална карта.
+10. Провери двата locale-а и целия acceptance flow с реален email адрес и
+   public staging domain. Увери се, че UI ясно казва, че няма реално таксуване
+   и не иска картови данни.
 11. Ако използваш discovery, конфигурирай само feeds с право за
     republication, генерирай `CRON_SECRET` и остави конфигурирания daily
     Vercel Cron да извиква `GET /api/cron/events/discover`. Външен scheduler

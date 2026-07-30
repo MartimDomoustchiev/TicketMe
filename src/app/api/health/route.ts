@@ -12,7 +12,7 @@ export const dynamic = "force-dynamic";
 export async function GET() {
   const postgresConfigured = isDatabaseConfigured();
   const development = process.env.NODE_ENV !== "production";
-  const paymentMode = stripeMode();
+  const configuredStripeMode = stripeMode();
   const checks = {
     database: postgresConfigured || development,
     email:
@@ -25,8 +25,11 @@ export async function GET() {
           process.env.S3_SECRET_ACCESS_KEY,
       ) || development,
     publicUrl: Boolean(resolvePublicBaseUrl()) || development,
-    stripe: paymentMode !== null || development,
-    stripeLive: paymentMode === "live" || development,
+    demoPayment: true,
+  };
+  const optionalChecks = {
+    stripe: configuredStripeMode !== null || development,
+    stripeLive: configuredStripeMode === "live" || development,
     stripeWebhook:
       Boolean(process.env.STRIPE_WEBHOOK_SECRET?.startsWith("whsec_")) ||
       development,
@@ -57,8 +60,10 @@ export async function GET() {
   return Response.json(
     {
       status: ready ? "ready" : "degraded",
+      paymentMode: "demo",
       checks: {
         ...checks,
+        ...optionalChecks,
         databaseReachable,
         databaseSchemaReady,
         databaseTls,

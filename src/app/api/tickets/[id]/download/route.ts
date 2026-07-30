@@ -6,7 +6,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function GET(
-  _request: Request,
+  request: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params;
@@ -37,10 +37,15 @@ export async function GET(
     return Response.json({ error: "PDF файлът липсва." }, { status: 404 });
   }
 
+  const disposition =
+    new URL(request.url).searchParams.get("print") === "1"
+      ? "inline"
+      : "attachment";
+
   return new Response(Buffer.from(pdf), {
     headers: {
       "Content-Type": "application/pdf",
-      "Content-Disposition": `attachment; filename="${ticket.id}.pdf"`,
+      "Content-Disposition": `${disposition}; filename="${ticket.id}.pdf"`,
       "Cache-Control": "private, no-store",
     },
   });
