@@ -176,6 +176,15 @@ async function prepareSchema(): Promise<void> {
     ON checkout_reservations (event_id, ticket_type, status)
   `;
   await db`
+    CREATE UNIQUE INDEX IF NOT EXISTS
+      checkout_reservations_active_buyer_event_idx
+    ON checkout_reservations (
+      event_id,
+      (LOWER(BTRIM(buyer_email)))
+    )
+    WHERE status IN ('reserved', 'checkout_created')
+  `;
+  await db`
     CREATE TABLE IF NOT EXISTS audit_log (
       id TEXT PRIMARY KEY,
       at TIMESTAMPTZ NOT NULL,
@@ -369,7 +378,7 @@ async function releaseExpiredInTransaction(
               delivery_status = NULL,
               delivery_lease_token = NULL,
               delivery_lease_expires_at = NULL
-          WHERE status IN ('reserved', 'checkout_created')
+          WHERE status = 'reserved'
             AND expires_at <= NOW()
             AND event_id = ${eventId}
             AND ticket_type = ${ticketType}
@@ -383,7 +392,7 @@ async function releaseExpiredInTransaction(
                 delivery_status = NULL,
                 delivery_lease_token = NULL,
                 delivery_lease_expires_at = NULL
-            WHERE status IN ('reserved', 'checkout_created')
+            WHERE status = 'reserved'
               AND expires_at <= NOW()
               AND event_id = ${eventId}
             RETURNING id, event_id, ticket_type, buyer_email
@@ -395,7 +404,7 @@ async function releaseExpiredInTransaction(
                 delivery_status = NULL,
                 delivery_lease_token = NULL,
                 delivery_lease_expires_at = NULL
-            WHERE status IN ('reserved', 'checkout_created')
+            WHERE status = 'reserved'
               AND expires_at <= NOW()
             RETURNING id, event_id, ticket_type, buyer_email
           `;
@@ -474,8 +483,10 @@ export async function getPurchaseActivity(
         SELECT COUNT(*)::INTEGER
         FROM checkout_reservations
         WHERE event_id = ${event.id}
-          AND status IN ('reserved', 'checkout_created')
-          AND expires_at > NOW()
+          AND (
+            status = 'checkout_created' OR
+            (status = 'reserved' AND expires_at > NOW())
+          )
       ) AS active_checkouts
   `;
 
@@ -808,6 +819,7 @@ export async function reserveCheckoutTicket(
     input.expiresInMs > 0
       ? Math.floor(input.expiresInMs)
       : DEFAULT_RESERVATION_LIFETIME_MS;
+  const normalizedBuyerEmail = input.buyerEmail.trim().toLowerCase();
   const requestId = randomBytes(18).toString("base64url");
   const reservationId = `RSV-${randomBytes(12)
     .toString("hex")
@@ -887,11 +899,32 @@ export async function reserveCheckoutTicket(
           return { status: "waiting" as const };
         }
 
+        await transaction`
+          SELECT pg_advisory_xact_lock(
+            hashtext(${`active-checkout:${event.id}`}),
+            hashtext(${normalizedBuyerEmail})
+          )
+        `;
         await releaseExpiredInTransaction(
           transaction,
           event.id,
-          input.ticketType,
         );
+        const activeRows = await transaction`
+          SELECT id
+          FROM checkout_reservations
+          WHERE event_id = ${event.id}
+            AND LOWER(BTRIM(buyer_email)) = ${normalizedBuyerEmail}
+            AND status IN ('reserved', 'checkout_created')
+          LIMIT 1
+        `;
+        if (activeRows[0]) {
+          await transaction`
+            DELETE FROM purchase_queue
+            WHERE request_id = ${requestId}
+          `;
+          return { status: "active_checkout" as const };
+        }
+
         const inventoryRows = await transaction`
           UPDATE event_inventory
           SET remaining = remaining - 1
@@ -920,7 +953,7 @@ export async function reserveCheckoutTicket(
             ${event.id},
             ${input.ticketType},
             ${input.buyerName.trim()},
-            ${input.buyerEmail.trim().toLowerCase()},
+            ${normalizedBuyerEmail},
             ${input.locale === "en" ? "en" : "bg"},
             'reserved',
             ${createdAt},
@@ -934,7 +967,7 @@ export async function reserveCheckoutTicket(
             ${randomBytes(10).toString("hex")},
             ${createdAt},
             'checkout_reservation_created',
-            ${input.buyerEmail.trim().toLowerCase()},
+            ${normalizedBuyerEmail},
             ${`${reservationId} ${event.id} ${input.ticketType}`}
           )
         `;
@@ -957,6 +990,9 @@ export async function reserveCheckoutTicket(
       if (result.status === "sold_out") {
         throw new Error("SOLD_OUT");
       }
+      if (result.status === "active_checkout") {
+        throw new Error("ACTIVE_CHECKOUT_EXISTS");
+      }
       if (result.status === "expired") {
         throw new Error("QUEUE_LEASE_EXPIRED");
       }
@@ -968,6 +1004,16 @@ export async function reserveCheckoutTicket(
     if (!reservation) {
       throw new Error("QUEUE_TIMEOUT");
     }
+  } catch (error) {
+    if (
+      isUniqueConstraintViolation(
+        error,
+        "checkout_reservations_active_buyer_event_idx",
+      )
+    ) {
+      throw new Error("ACTIVE_CHECKOUT_EXISTS");
+    }
+    throw error;
   } finally {
     await removeQueueRequest(requestId).catch(() => undefined);
   }
@@ -982,6 +1028,24 @@ function isUniqueViolation(error: unknown): boolean {
     error !== null &&
     "code" in error &&
     (error as { code?: string }).code === "23505"
+  );
+}
+
+function isUniqueConstraintViolation(
+  error: unknown,
+  constraint: string,
+): boolean {
+  if (!isUniqueViolation(error)) {
+    return false;
+  }
+
+  const details = error as {
+    constraint?: string;
+    constraint_name?: string;
+  };
+  return (
+    details.constraint === constraint ||
+    details.constraint_name === constraint
   );
 }
 
@@ -1010,8 +1074,7 @@ export async function attachCheckoutSession(
         row as Record<string, unknown>,
       );
       if (
-        (reservation.status === "reserved" ||
-          reservation.status === "checkout_created") &&
+        reservation.status === "reserved" &&
         Date.parse(reservation.expiresAt) <= Date.now()
       ) {
         await transaction`

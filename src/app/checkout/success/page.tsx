@@ -36,11 +36,23 @@ type CheckoutState = {
 
 async function checkoutState(
   sessionId: string,
+  buyerEmail: string,
 ): Promise<CheckoutState> {
   if (
     (!sessionId.startsWith("cs_test_") &&
       !sessionId.startsWith("cs_live_")) ||
     sessionId.length > 255
+  ) {
+    return { ticket: null, delivered: false, processing: false };
+  }
+
+  const ownedReservation = await getCheckoutReservationBySession(
+    sessionId,
+  ).catch(() => null);
+  if (
+    !ownedReservation ||
+    ownedReservation.buyerEmail.trim().toLowerCase() !==
+      buyerEmail.trim().toLowerCase()
   ) {
     return { ticket: null, delivered: false, processing: false };
   }
@@ -64,6 +76,13 @@ async function checkoutState(
     const reservation = await getCheckoutReservationBySession(
       sessionId,
     ).catch(() => null);
+    if (
+      !reservation ||
+      reservation.buyerEmail.trim().toLowerCase() !==
+        buyerEmail.trim().toLowerCase()
+    ) {
+      return { ticket: null, delivered: false, processing: false };
+    }
     const ticket = reservation?.ticketId
       ? await getTicket(reservation.ticketId).catch(() => null)
       : null;
@@ -90,7 +109,9 @@ export default async function CheckoutSuccessPage({
   const english = locale === "en";
   const sessionId =
     typeof query.session_id === "string" ? query.session_id : "";
-  const state = await checkoutState(sessionId);
+  const state = buyer
+    ? await checkoutState(sessionId, buyer.email)
+    : { ticket: null, delivered: false, processing: false };
   const isOwner =
     Boolean(state.ticket && buyer) &&
     state.ticket!.buyerEmail.trim().toLowerCase() ===

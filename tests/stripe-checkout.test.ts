@@ -29,7 +29,7 @@ const INTERNAL_EVENT: CatalogEvent = {
   ticketTypes: [TICKET_TYPE],
 };
 
-test("hosted Checkout restricts payment methods to immediate card wallets", () => {
+test("embedded Checkout stays on-site and enables immediate card wallets", () => {
   const ticketType = TICKET_TYPE;
   const params = buildStripeCheckoutSessionParams({
     baseUrl: "https://tickets.example",
@@ -42,6 +42,11 @@ test("hosted Checkout restricts payment methods to immediate card wallets", () =
   });
 
   assert.equal(params.mode, "payment");
+  assert.equal(params.ui_mode, "embedded_page");
+  assert.equal(params.redirect_on_completion, "never");
+  assert.equal(params.success_url, undefined);
+  assert.equal(params.cancel_url, undefined);
+  assert.equal(params.return_url, undefined);
   assert.deepEqual(params.payment_method_types, ["card"]);
   assert.deepEqual(params.branding_settings, {
     display_name: "TicketMe",

@@ -287,6 +287,9 @@ export async function databaseSchemaStatus(
       to_regclass('public.tickets') IS NOT NULL AS tickets,
       to_regclass('public.purchase_queue') IS NOT NULL AS purchase_queue,
       to_regclass('public.checkout_reservations') IS NOT NULL AS checkout_reservations,
+      to_regclass(
+        'public.checkout_reservations_active_buyer_event_idx'
+      ) IS NOT NULL AS checkout_reservations_active_buyer_event_idx,
       to_regclass('public.audit_log') IS NOT NULL AS audit_log,
       to_regclass('public.users') IS NOT NULL AS users,
       to_regclass('public.auth_sessions') IS NOT NULL AS auth_sessions,
@@ -306,6 +309,7 @@ export async function databaseSchemaStatus(
       row.tickets &&
       row.purchase_queue &&
       row.checkout_reservations &&
+      row.checkout_reservations_active_buyer_event_idx &&
       row.audit_log &&
       row.users &&
       row.auth_sessions &&

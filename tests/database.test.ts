@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+import path from "node:path";
 import test from "node:test";
 import {
   createDatabaseClient,
@@ -83,6 +85,31 @@ test("runtime DDL cannot be enabled in production", () => {
         NODE_ENV: "production",
       }),
     /cannot be enabled in production/,
+  );
+});
+
+test("checkout fairness migration allows one active hold per buyer and event", async () => {
+  const migration = await readFile(
+    path.join(
+      process.cwd(),
+      "database",
+      "migrations",
+      "005_checkout_fairness.sql",
+    ),
+    "utf8",
+  );
+
+  assert.match(
+    migration,
+    /CREATE UNIQUE INDEX IF NOT EXISTS\s+checkout_reservations_active_buyer_event_idx/,
+  );
+  assert.match(
+    migration,
+    /event_id,\s*\(LOWER\(BTRIM\(buyer_email\)\)\)/,
+  );
+  assert.match(
+    migration,
+    /WHERE status IN \('reserved', 'checkout_created'\)/,
   );
 });
 

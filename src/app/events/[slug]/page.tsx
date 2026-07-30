@@ -39,6 +39,7 @@ import {
   getPublicPurchaseActivity,
 } from "@/lib/public-availability";
 import { getBaseUrl } from "@/lib/site";
+import { getStripeTestPublishableKey } from "@/lib/stripe";
 import { getEventVisual } from "@/lib/event-visual";
 
 export const dynamic = "force-dynamic";
@@ -342,6 +343,7 @@ export default async function EventPage({ params }: EventPageProps) {
                 event={event}
                 initialAvailability={availability}
                 initialSession={buyerSession}
+                stripePublishableKey={getStripeTestPublishableKey()}
                 locale={locale}
               />
             </div>

@@ -14,9 +14,14 @@ import {
   Ticket,
   Users,
   WalletCards,
+  X,
 } from "lucide-react";
 import Link from "next/link";
 import { useMemo, useState } from "react";
+import {
+  StripeEmbeddedCheckout,
+  type StripeTicketResult,
+} from "@/components/checkout/StripeEmbeddedCheckout";
 import { useLiveTicketingStatus } from "@/components/ticketing/LiveTicketingProvider";
 import type { BuyerSession } from "@/lib/auth";
 import {
@@ -30,22 +35,16 @@ type Props = {
   event: CatalogEvent;
   initialAvailability: Availability;
   initialSession: BuyerSession | null;
+  stripePublishableKey: string | null;
   locale?: "bg" | "en";
 };
 
-type DemoPurchaseResult = {
-  ticketId: string;
-  ticketUrl: string;
-  downloadUrl: string;
-  printUrl: string;
-  emailDelivered: boolean;
-  payment: {
-    mode: "demo";
-    reference: string;
-    charged: false;
-    amount: number;
-    currency: string;
-  };
+type StripeCheckoutSession = {
+  clientSecret: string;
+  checkoutSessionId: string;
+  reservationId: string;
+  expiresAt: string;
+  mode: "test";
 };
 
 const COPY = {
@@ -62,24 +61,28 @@ const COPY = {
     remaining: "билета остават за събитието",
     soldProgress: "Продадени билети",
     verifiedEmail: "Потвърден имейл",
-    processing: "Издаваме твоя билет…",
-    payDemo: "Плати демо",
+    processing: "Създаваме защитената Stripe форма…",
+    payStripe: "Плати със Stripe",
     signInTitle: "Вход преди поръчка",
     signInText: "Потвърди имейла си, за да получиш и изтеглиш билета.",
     signIn: "Вход или регистрация",
     secureIssuing: "Сигурно издаване",
     liveAvailability: "Жива наличност",
-    processedBy: "Демо плащане в TicketMe — няма реално таксуване",
-    paymentOptions: "TicketMe Demo Card",
-    walletHint: "Тестова карта •••• 4242",
+    processedBy: "Stripe test mode — няма реално таксуване",
+    paymentOptions: "Stripe плащане в TicketMe",
+    walletHint: "Карта · Apple Pay · Google Pay",
     reservationWindow:
-      "Заявката влиза в честната опашка. Билетът и PDF файлът се генерират тук, без пренасочване.",
-    demoNoticeTitle: "Симулация за училищния проект",
-    demoNotice:
-      "Не въвеждай истински данни за карта. При натискане ще издадем тестов билет, без да вземаме пари.",
-    successTitle: "Демо плащането е успешно",
+      "При отваряне мястото се резервира през честната опашка. Stripe формата остава в TicketMe.",
+    testNoticeTitle: "Stripe sandbox",
+    testNotice:
+      "Използвай тестова карта 4242 4242 4242 4242, бъдеща дата и произволен CVC. Apple Pay и Google Pay се показват само на поддържани устройства.",
+    successTitle: "Тестовото Stripe плащане е успешно",
     successText: "Твоят PDF билет с QR код е готов.",
-    paymentReference: "Референция",
+    paymentReference: "Stripe референция",
+    cancelCheckout: "Смени билета",
+    cancellingCheckout: "Освобождаваме мястото…",
+    missingPublishableKey:
+      "Stripe sandbox конфигурацията е непълна. Нужни са matching sk_test_, pk_test_ и whsec_ стойности.",
     openTicket: "Виж билета",
     downloadPdf: "Изтегли PDF",
     printPdf: "Отвори за печат",
@@ -94,7 +97,7 @@ const COPY = {
     genericError: "Билетът не можа да бъде издаден. Опитай отново.",
     networkError: "Връзката беше прекъсната. Опитай отново.",
     queueNow: "в опашката сега",
-    activeCheckouts: "активни плащания",
+    activeCheckouts: "активни Stripe плащания",
   },
   en: {
     ticketTypesEyebrow: "Ticket types",
@@ -109,24 +112,28 @@ const COPY = {
     remaining: "tickets left for this event",
     soldProgress: "Tickets sold",
     verifiedEmail: "Verified email",
-    processing: "Issuing your ticket…",
-    payDemo: "Demo pay",
+    processing: "Creating the secure Stripe form…",
+    payStripe: "Pay with Stripe",
     signInTitle: "Sign in to purchase",
     signInText: "Verify your email to receive and download your ticket.",
     signIn: "Sign in or register",
     secureIssuing: "Secure ticketing",
     liveAvailability: "Live availability",
-    processedBy: "TicketMe demo payment — no real charge",
-    paymentOptions: "TicketMe Demo Card",
-    walletHint: "Test card •••• 4242",
+    processedBy: "Stripe test mode — no real charge",
+    paymentOptions: "Stripe payment inside TicketMe",
+    walletHint: "Card · Apple Pay · Google Pay",
     reservationWindow:
-      "Your request joins the fair queue. The ticket and PDF are generated here without a redirect.",
-    demoNoticeTitle: "School-project simulation",
-    demoNotice:
-      "Do not enter real card details. Clicking the button issues a test ticket without charging money.",
-    successTitle: "Demo payment successful",
+      "Opening checkout reserves the ticket through the fair queue. The Stripe form stays inside TicketMe.",
+    testNoticeTitle: "Stripe sandbox",
+    testNotice:
+      "Use test card 4242 4242 4242 4242, any future date and any CVC. Apple Pay and Google Pay only appear on eligible devices.",
+    successTitle: "Stripe test payment successful",
     successText: "Your PDF ticket with its QR code is ready.",
-    paymentReference: "Reference",
+    paymentReference: "Stripe reference",
+    cancelCheckout: "Change ticket",
+    cancellingCheckout: "Releasing the ticket…",
+    missingPublishableKey:
+      "Stripe sandbox configuration is incomplete. Matching sk_test_, pk_test_, and whsec_ values are required.",
     openTicket: "View ticket",
     downloadPdf: "Download PDF",
     printPdf: "Open to print",
@@ -180,6 +187,7 @@ export function TicketDesk({
   event,
   initialAvailability,
   initialSession,
+  stripePublishableKey,
   locale = "bg",
 }: Props) {
   const [selectedType, setSelectedType] = useState<TicketTypeId>(
@@ -188,8 +196,11 @@ export function TicketDesk({
   );
   const [message, setMessage] = useState<string | null>(null);
   const [isBuying, setIsBuying] = useState(false);
+  const [isCancelling, setIsCancelling] = useState(false);
+  const [stripeSession, setStripeSession] =
+    useState<StripeCheckoutSession | null>(null);
   const [purchaseResult, setPurchaseResult] =
-    useState<DemoPurchaseResult | null>(null);
+    useState<StripeTicketResult | null>(null);
   const liveStatus = useLiveTicketingStatus();
   const availability =
     liveStatus?.availability ?? initialAvailability;
@@ -220,8 +231,13 @@ export function TicketDesk({
         )
       : 0;
 
-  async function buyTicket() {
-    if (isBuying || selectedRemaining <= 0) {
+  async function startStripeCheckout() {
+    if (
+      isBuying ||
+      stripeSession ||
+      !stripePublishableKey ||
+      selectedRemaining <= 0
+    ) {
       return;
     }
 
@@ -229,36 +245,32 @@ export function TicketDesk({
     setMessage(null);
 
     try {
-      const response = await fetch("/api/purchase", {
+      const response = await fetch("/api/stripe/checkout", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           eventId: event.id,
           ticketType: selectedType,
           locale,
-          paymentMode: "demo",
-          demoConfirmed: true,
         }),
       });
-      const data = (await response.json()) as Partial<DemoPurchaseResult> & {
-        ok?: boolean;
+      const data = (await response.json()) as Partial<StripeCheckoutSession> & {
         error?: string;
       };
 
       if (
         !response.ok ||
-        !data.ok ||
-        !data.ticketId ||
-        !data.ticketUrl ||
-        !data.downloadUrl ||
-        !data.printUrl ||
-        !data.payment
+        !data.clientSecret ||
+        !data.checkoutSessionId ||
+        !data.reservationId ||
+        !data.expiresAt ||
+        data.mode !== "test"
       ) {
         setMessage(data.error ?? copy.genericError);
         return;
       }
 
-      setPurchaseResult(data as DemoPurchaseResult);
+      setStripeSession(data as StripeCheckoutSession);
     } catch {
       setMessage(copy.networkError);
     } finally {
@@ -266,9 +278,48 @@ export function TicketDesk({
     }
   }
 
+  async function cancelStripeCheckout() {
+    if (!stripeSession || isCancelling) {
+      return;
+    }
+
+    setIsCancelling(true);
+    setMessage(null);
+
+    try {
+      const response = await fetch("/api/stripe/cancel", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          reservationId: stripeSession.reservationId,
+        }),
+      });
+      const payload = (await response.json()) as {
+        error?: string;
+        completed?: boolean;
+      };
+
+      if (!response.ok) {
+        setMessage(payload.error ?? copy.genericError);
+        return;
+      }
+
+      if (payload.completed) {
+        setMessage(copy.genericError);
+        return;
+      }
+
+      setStripeSession(null);
+    } catch {
+      setMessage(copy.networkError);
+    } finally {
+      setIsCancelling(false);
+    }
+  }
+
   return (
     <section id="tickets" className="scroll-mt-24">
-      <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_390px]">
+      <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_430px]">
         <div>
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
@@ -302,7 +353,7 @@ export function TicketDesk({
                   key={type.id}
                   type="button"
                   aria-pressed={isSelected}
-                  disabled={isSoldOut}
+                  disabled={isSoldOut || Boolean(stripeSession)}
                   onClick={() => setSelectedType(type.id)}
                   className={`group flex min-h-28 w-full items-start gap-3 rounded-2xl border bg-white p-4 text-left transition sm:items-center sm:gap-4 sm:p-5 ${
                     isSelected
@@ -441,7 +492,7 @@ export function TicketDesk({
                 <div className="flex items-center justify-between gap-3">
                   <dt className="font-bold">{copy.paymentReference}</dt>
                   <dd className="break-all text-right font-mono font-black">
-                    {purchaseResult.payment.reference}
+                    {purchaseResult.paymentReference}
                   </dd>
                 </div>
               </dl>
@@ -476,7 +527,10 @@ export function TicketDesk({
                 </a>
                 <button
                   type="button"
-                  onClick={() => setPurchaseResult(null)}
+                  onClick={() => {
+                    setPurchaseResult(null);
+                    setStripeSession(null);
+                  }}
                   className="inline-flex h-11 items-center justify-center gap-2 rounded-xl px-4 text-sm font-black text-emerald-800 transition hover:bg-emerald-100"
                 >
                   <RefreshCw size={16} aria-hidden="true" />
@@ -488,89 +542,147 @@ export function TicketDesk({
             <>
               <div className="mt-5 rounded-2xl bg-emerald-50 p-4">
                 <p className="flex items-center gap-2 text-sm font-black text-emerald-900">
-                  <ShieldCheck size={17} />
+                  <ShieldCheck size={17} aria-hidden="true" />
                   {copy.verifiedEmail}
                 </p>
                 <p className="mt-1 truncate text-sm text-emerald-800">
                   {session.email}
                 </p>
               </div>
-              <div className="mt-4 overflow-hidden rounded-2xl bg-[linear-gradient(135deg,#10172a,#2457ff)] p-4 text-white shadow-lg shadow-blue-950/15">
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <p className="text-[10px] font-black uppercase tracking-[0.14em] text-blue-100">
-                      {copy.paymentOptions}
+              {stripeSession && stripePublishableKey ? (
+                <div className="mt-4">
+                  <div className="mb-3 flex items-center justify-between gap-3">
+                    <div>
+                      <p className="text-xs font-black uppercase tracking-[0.12em] text-blue-700">
+                        Stripe · Test mode
+                      </p>
+                      <p className="mt-1 text-xs font-bold text-slate-500">
+                        {copy.walletHint}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={cancelStripeCheckout}
+                      disabled={isCancelling}
+                      className="inline-flex min-h-10 items-center justify-center gap-1.5 rounded-xl border border-slate-200 px-3 text-xs font-black text-slate-700 transition hover:border-slate-300 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      {isCancelling ? (
+                        <Loader2
+                          className="animate-spin"
+                          size={15}
+                          aria-hidden="true"
+                        />
+                      ) : (
+                        <X size={15} aria-hidden="true" />
+                      )}
+                      {isCancelling
+                        ? copy.cancellingCheckout
+                        : copy.cancelCheckout}
+                    </button>
+                  </div>
+                  <StripeEmbeddedCheckout
+                    publishableKey={stripePublishableKey}
+                    clientSecret={stripeSession.clientSecret}
+                    checkoutSessionId={stripeSession.checkoutSessionId}
+                    locale={locale}
+                    onComplete={(result) => {
+                      setStripeSession(null);
+                      setPurchaseResult(result);
+                    }}
+                  />
+                </div>
+              ) : (
+                <>
+                  <div className="mt-4 rounded-2xl border border-blue-100 bg-[linear-gradient(145deg,#f8fbff,#eef4ff)] p-4">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <p className="text-xs font-black uppercase tracking-[0.14em] text-blue-700">
+                          {copy.paymentOptions}
+                        </p>
+                        <p className="mt-1 text-xs font-bold text-slate-500">
+                          {copy.processedBy}
+                        </p>
+                      </div>
+                      <span className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[#635bff] text-white shadow-sm">
+                        <WalletCards size={20} aria-hidden="true" />
+                      </span>
+                    </div>
+                    <div className="mt-4 grid grid-cols-3 gap-2 text-center text-[11px] font-black">
+                      <span className="rounded-lg bg-black px-2 py-2 text-white">
+                        Apple Pay
+                      </span>
+                      <span className="rounded-lg bg-white px-2 py-2 text-slate-800 ring-1 ring-slate-200">
+                        G Pay
+                      </span>
+                      <span className="rounded-lg bg-white px-2 py-2 text-slate-800 ring-1 ring-slate-200">
+                        Card
+                      </span>
+                    </div>
+                  </div>
+                  <div className="mt-3 rounded-2xl border border-amber-200 bg-amber-50 p-3.5">
+                    <p className="flex items-center gap-2 text-xs font-black text-amber-950">
+                      <ShieldCheck
+                        size={16}
+                        className="shrink-0 text-amber-700"
+                        aria-hidden="true"
+                      />
+                      {copy.testNoticeTitle}
                     </p>
-                    <p className="mt-4 font-mono text-xl font-black tracking-[0.16em]">
-                      •••• 4242
+                    <p className="mt-2 text-[11px] leading-5 text-amber-900">
+                      {copy.testNotice}
                     </p>
                   </div>
-                  <WalletCards size={24} aria-hidden="true" />
-                </div>
-                <div className="mt-4 flex items-end justify-between gap-3 text-xs">
-                  <span className="truncate font-bold uppercase">
-                    {session.name}
-                  </span>
-                  <span className="shrink-0 rounded-md bg-white/15 px-2 py-1 font-black">
-                    DEMO
-                  </span>
-                </div>
-              </div>
-              <div className="mt-3 rounded-2xl border border-amber-200 bg-amber-50 p-3.5">
-                <p className="flex items-center gap-2 text-xs font-black text-amber-950">
-                  <ShieldCheck
-                    size={16}
-                    className="shrink-0 text-amber-700"
-                    aria-hidden="true"
-                  />
-                  {copy.demoNoticeTitle}
-                </p>
-                <p className="mt-2 text-[11px] leading-5 text-amber-900">
-                  {copy.demoNotice}
-                </p>
-              </div>
-              <p className="mt-3 text-xs font-bold leading-5 text-slate-600">
-                {copy.reservationWindow}
-              </p>
-              <button
-                type="button"
-                onClick={buyTicket}
-                disabled={isBuying || selectedRemaining <= 0}
-                aria-busy={isBuying}
-                className="mt-3 inline-flex h-13 w-full items-center justify-center gap-2 rounded-2xl bg-blue-600 px-5 font-black text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-55"
-              >
-                {isBuying ? (
-                  <Loader2 className="animate-spin" size={19} />
-                ) : (
-                  <CreditCard size={18} />
-                )}
-                {isBuying
-                  ? copy.processing
-                  : `${copy.payDemo} · ${selectedPrice}`}
-              </button>
-              <p className="mt-3 text-center text-xs font-bold text-slate-500">
-                {copy.processedBy}
-              </p>
-              <p className="mt-1 text-center text-[11px] text-slate-400">
-                {copy.walletHint}
-              </p>
-              <p className="mt-2 text-center text-[11px] leading-5 text-slate-500">
-                {copy.agreementStart}{" "}
-                <Link
-                  href={`/${locale}/terms`}
-                  className="font-bold underline underline-offset-2 hover:text-slate-800"
-                >
-                  {copy.terms}
-                </Link>{" "}
-                {copy.and}{" "}
-                <Link
-                  href={`/${locale}/privacy`}
-                  className="font-bold underline underline-offset-2 hover:text-slate-800"
-                >
-                  {copy.privacy}
-                </Link>
-                .
-              </p>
+                  <p className="mt-3 text-xs font-bold leading-5 text-slate-600">
+                    {copy.reservationWindow}
+                  </p>
+                  {!stripePublishableKey && (
+                    <p className="mt-3 rounded-xl bg-rose-50 p-3 text-xs font-bold leading-5 text-rose-800">
+                      {copy.missingPublishableKey}
+                    </p>
+                  )}
+                  <button
+                    type="button"
+                    onClick={startStripeCheckout}
+                    disabled={
+                      isBuying ||
+                      !stripePublishableKey ||
+                      selectedRemaining <= 0
+                    }
+                    aria-busy={isBuying}
+                    className="mt-3 inline-flex h-13 w-full items-center justify-center gap-2 rounded-2xl bg-[#635bff] px-5 font-black text-white transition hover:bg-[#5148e5] disabled:cursor-not-allowed disabled:opacity-55"
+                  >
+                    {isBuying ? (
+                      <Loader2
+                        className="animate-spin"
+                        size={19}
+                        aria-hidden="true"
+                      />
+                    ) : (
+                      <CreditCard size={18} aria-hidden="true" />
+                    )}
+                    {isBuying
+                      ? copy.processing
+                      : `${copy.payStripe} · ${selectedPrice}`}
+                  </button>
+                  <p className="mt-3 text-center text-[11px] leading-5 text-slate-500">
+                    {copy.agreementStart}{" "}
+                    <Link
+                      href={`/${locale}/terms`}
+                      className="font-bold underline underline-offset-2 hover:text-slate-800"
+                    >
+                      {copy.terms}
+                    </Link>{" "}
+                    {copy.and}{" "}
+                    <Link
+                      href={`/${locale}/privacy`}
+                      className="font-bold underline underline-offset-2 hover:text-slate-800"
+                    >
+                      {copy.privacy}
+                    </Link>
+                    .
+                  </p>
+                </>
+              )}
             </>
           ) : (
             <div className="mt-5 rounded-2xl border border-blue-100 bg-blue-50 p-4">

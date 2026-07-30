@@ -12,7 +12,11 @@ import {
   cancelCheckoutReservation,
   reserveCheckoutTicket,
 } from "@/lib/store";
-import { getStripeClient, isStripeConfigured, stripeMode } from "@/lib/stripe";
+import {
+  getStripeClient,
+  isStripeEmbeddedTestConfigured,
+  stripeMode,
+} from "@/lib/stripe";
 import { buildStripeCheckoutSessionParams } from "@/lib/stripe-checkout";
 
 export const runtime = "nodejs";
@@ -33,6 +37,8 @@ const ERROR_COPY = {
     eventUnavailable: "Събитието вече не е достъпно.",
     invalidTicket: "Избери валидна категория билет.",
     soldOut: "Тази категория вече е изчерпана.",
+    activeCheckout:
+      "Вече имаш активно плащане за това събитие. Завърши го или освободи билета.",
     busy: "В момента има много заявки. Опитай отново след няколко секунди.",
     failed: "Не успяхме да стартираме сигурното плащане. Опитай отново.",
   },
@@ -44,6 +50,8 @@ const ERROR_COPY = {
     eventUnavailable: "This event is no longer available.",
     invalidTicket: "Choose a valid ticket category.",
     soldOut: "This ticket category has just sold out.",
+    activeCheckout:
+      "You already have an active checkout for this event. Finish it or release the ticket first.",
     busy: "Demand is high right now. Please try again in a few seconds.",
     failed: "We could not start secure checkout. Please try again.",
   },
@@ -82,7 +90,7 @@ export async function POST(request: Request) {
     return checkoutError(errorCopy.signIn, 401);
   }
 
-  if (!isStripeConfigured()) {
+  if (!isStripeEmbeddedTestConfigured()) {
     return checkoutError(errorCopy.unavailable, 503, { "Retry-After": "30" });
   }
 
@@ -110,8 +118,9 @@ export async function POST(request: Request) {
   let stripeSessionId: string | null = null;
 
   try {
-    // Stripe allows a minimum 30-minute Checkout lifetime. The local
-    // reservation keeps a short webhook-delivery grace period; the
+    // Stripe allows a minimum 30-minute Checkout lifetime. Use 31 minutes so
+    // clock and request latency cannot put expires_at below Stripe's minimum.
+    // The local reservation keeps a short webhook-delivery grace period; the
     // checkout.session.expired event normally releases it immediately.
     reservation = await reserveCheckoutTicket({
       eventId: event.id,
@@ -127,21 +136,19 @@ export async function POST(request: Request) {
       buildStripeCheckoutSessionParams({
         baseUrl,
         event,
-        expiresAtUnix: Math.floor(Date.now() / 1000) + 30 * 60,
+        expiresAtUnix: Math.floor(Date.now() / 1000) + 31 * 60,
         locale,
         reservationId: reservation.id,
         ticketType,
         buyerEmail: session.email,
       }),
-      {
-        idempotencyKey: `ticketforge-checkout-${reservation.id}`,
-      },
+      { idempotencyKey: `ticketme-embedded-checkout-${reservation.id}` },
     );
 
     stripeSessionId = checkoutSession.id;
 
-    if (!checkoutSession.url) {
-      throw new Error("STRIPE_CHECKOUT_URL_MISSING");
+    if (!checkoutSession.client_secret) {
+      throw new Error("STRIPE_CHECKOUT_CLIENT_SECRET_MISSING");
     }
 
     await attachCheckoutSession({
@@ -150,7 +157,9 @@ export async function POST(request: Request) {
     });
 
     return Response.json({
-      checkoutUrl: checkoutSession.url,
+      clientSecret: checkoutSession.client_secret,
+      checkoutSessionId: checkoutSession.id,
+      reservationId: reservation.id,
       expiresAt: reservation.expiresAt,
       mode: stripeMode(),
     });
@@ -168,6 +177,16 @@ export async function POST(request: Request) {
     const message = (error as Error).message;
     if (message === "SOLD_OUT") {
       return checkoutError(errorCopy.soldOut, 409);
+    }
+
+    if (message === "ACTIVE_CHECKOUT_EXISTS") {
+      return Response.json(
+        {
+          code: "ACTIVE_CHECKOUT_EXISTS",
+          error: errorCopy.activeCheckout,
+        },
+        { status: 409 },
+      );
     }
 
     if (

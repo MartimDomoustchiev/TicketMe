@@ -101,6 +101,125 @@ test("external catalogue listings cannot allocate or reserve local inventory", a
       availabilityAfterCancellation.totalRemaining,
       availabilityBefore.totalRemaining,
     );
+
+    const duplicateAttempts = await Promise.allSettled([
+      store.reserveCheckoutTicket({
+        eventId: PRIMARY_SALE_EVENT.id,
+        buyerName: "Fair Queue Buyer",
+        buyerEmail: " Queue@example.com ",
+        ticketType: "fan",
+      }),
+      store.reserveCheckoutTicket({
+        eventId: PRIMARY_SALE_EVENT.id,
+        buyerName: "Fair Queue Buyer",
+        buyerEmail: "queue@EXAMPLE.com",
+        ticketType: "premium",
+      }),
+    ]);
+    const successfulReservations = duplicateAttempts.filter(
+      (
+        result,
+      ): result is PromiseFulfilledResult<
+        Awaited<ReturnType<typeof store.reserveCheckoutTicket>>
+      > => result.status === "fulfilled",
+    );
+    const rejectedReservations = duplicateAttempts.filter(
+      (result): result is PromiseRejectedResult =>
+        result.status === "rejected",
+    );
+    assert.equal(successfulReservations.length, 1);
+    assert.equal(rejectedReservations.length, 1);
+    assert.match(
+      String(rejectedReservations[0].reason),
+      /ACTIVE_CHECKOUT_EXISTS/,
+    );
+
+    const availabilityWithDuplicateAttempt =
+      await store.getAvailability(PRIMARY_SALE_EVENT.id);
+    assert.equal(
+      availabilityWithDuplicateAttempt.totalRemaining,
+      availabilityBefore.totalRemaining - 1,
+    );
+    assert.equal(
+      (
+        await store.getPurchaseActivity(PRIMARY_SALE_EVENT.id)
+      ).activeCheckouts,
+      1,
+    );
+    await store.cancelCheckoutReservation(
+      successfulReservations[0].value.id,
+    );
+
+    const attachedReservation = await store.reserveCheckoutTicket({
+      eventId: PRIMARY_SALE_EVENT.id,
+      buyerName: "Deadline Buyer",
+      buyerEmail: "deadline@example.com",
+      ticketType: "standard",
+      expiresInMs: 20,
+    });
+    await store.attachCheckoutSession({
+      reservationId: attachedReservation.id,
+      stripeCheckoutSessionId: "cs_test_deadline_authoritative",
+    });
+    await new Promise((resolve) => setTimeout(resolve, 30));
+
+    assert.equal(
+      await store.releaseExpiredCheckoutReservations(
+        PRIMARY_SALE_EVENT.id,
+      ),
+      0,
+    );
+    assert.equal(
+      (
+        await store.getCheckoutReservation(
+          attachedReservation.id,
+        )
+      )?.status,
+      "checkout_created",
+    );
+    assert.equal(
+      (
+        await store.getPurchaseActivity(PRIMARY_SALE_EVENT.id)
+      ).activeCheckouts,
+      1,
+    );
+
+    await store.expireCheckoutReservation(attachedReservation.id);
+    assert.equal(
+      (
+        await store.getAvailability(PRIMARY_SALE_EVENT.id)
+      ).totalRemaining,
+      availabilityBefore.totalRemaining,
+    );
+
+    const unattachedReservation = await store.reserveCheckoutTicket({
+      eventId: PRIMARY_SALE_EVENT.id,
+      buyerName: "Abandoned Buyer",
+      buyerEmail: "abandoned@example.com",
+      ticketType: "standard",
+      expiresInMs: 100,
+    });
+    await new Promise((resolve) => setTimeout(resolve, 130));
+    assert.equal(
+      await store.releaseExpiredCheckoutReservations(
+        PRIMARY_SALE_EVENT.id,
+      ),
+      1,
+    );
+    assert.equal(
+      (
+        await store.getCheckoutReservation(
+          unattachedReservation.id,
+        )
+      )?.status,
+      "expired",
+    );
+    assert.equal(
+      (
+        await store.getAvailability(PRIMARY_SALE_EVENT.id)
+      ).totalRemaining,
+      availabilityBefore.totalRemaining,
+    );
   } finally {
     process.chdir(originalCwd);
     await rm(isolatedCwd, { recursive: true, force: true });

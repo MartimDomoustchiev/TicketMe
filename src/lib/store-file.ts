@@ -467,7 +467,7 @@ function releaseExpiredInState(
   for (const reservation of Object.values(state.checkoutReservations)) {
     if (
       (!eventId || reservation.eventId === eventId) &&
-      isActiveReservation(reservation) &&
+      reservation.status === "reserved" &&
       Date.parse(reservation.expiresAt) <= now &&
       releaseReservationInventory(state, reservation, "expired", at)
     ) {
@@ -575,7 +575,8 @@ export async function getPurchaseActivity(
     (reservation) =>
       reservation.eventId === eventId &&
       isActiveReservation(reservation) &&
-      Date.parse(reservation.expiresAt) > now,
+      (reservation.status === "checkout_created" ||
+        Date.parse(reservation.expiresAt) > now),
   ).length;
 
   return {
@@ -715,8 +716,25 @@ export async function reserveCheckoutTicket(
     input.expiresInMs > 0
       ? Math.floor(input.expiresInMs)
       : DEFAULT_RESERVATION_LIFETIME_MS;
-  const reservation = await withStoreMutation((state) => {
+  const normalizedBuyerEmail = input.buyerEmail.trim().toLowerCase();
+  const result = await withStoreMutation((state) => {
     releaseExpiredInState(state, event.id);
+    const activeReservation = Object.values(
+      state.checkoutReservations,
+    ).find(
+      (candidate) =>
+        candidate.eventId === event.id &&
+        candidate.buyerEmail.trim().toLowerCase() ===
+          normalizedBuyerEmail &&
+        isActiveReservation(candidate),
+    );
+    if (activeReservation) {
+      return {
+        reservation: null,
+        error: "ACTIVE_CHECKOUT_EXISTS" as const,
+      };
+    }
+
     const remainingByType = eventInventory(state, event.id);
     const remaining = remainingByType[input.ticketType] ?? 0;
     if (remaining <= 0) {
@@ -734,7 +752,7 @@ export async function reserveCheckoutTicket(
       eventId: event.id,
       ticketType: input.ticketType,
       buyerName: input.buyerName.trim(),
-      buyerEmail: input.buyerEmail.trim().toLowerCase(),
+      buyerEmail: normalizedBuyerEmail,
       locale: input.locale === "en" ? "en" : "bg",
       status: "reserved",
       createdAt,
@@ -760,11 +778,18 @@ export async function reserveCheckoutTicket(
       actor: storedReservation.buyerEmail,
       details: `${id} ${event.id} ${input.ticketType}`,
     });
-    return publicReservation(storedReservation);
+    return {
+      reservation: publicReservation(storedReservation),
+      error: null,
+    };
   });
 
+  if (result.error) {
+    throw new Error(result.error);
+  }
+
   emitAvailability(event.id, await getAvailability(event.id));
-  return reservation;
+  return result.reservation as CheckoutReservation;
 }
 
 export async function attachCheckoutSession(
@@ -785,7 +810,7 @@ export async function attachCheckoutSession(
     }
 
     if (
-      isActiveReservation(reservation) &&
+      reservation.status === "reserved" &&
       Date.parse(reservation.expiresAt) <= Date.now()
     ) {
       releaseReservationInventory(

@@ -4,7 +4,7 @@ import {
 } from "@/lib/database";
 import { isEmailReadyForArbitraryRecipients } from "@/lib/email";
 import { resolvePublicBaseUrl } from "@/lib/site";
-import { stripeMode } from "@/lib/stripe";
+import { stripeMode, stripePublishableMode } from "@/lib/stripe";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -25,11 +25,9 @@ export async function GET() {
           process.env.S3_SECRET_ACCESS_KEY,
       ) || development,
     publicUrl: Boolean(resolvePublicBaseUrl()) || development,
-    demoPayment: true,
-  };
-  const optionalChecks = {
-    stripe: configuredStripeMode !== null || development,
-    stripeLive: configuredStripeMode === "live" || development,
+    stripeTestSecret: configuredStripeMode === "test" || development,
+    stripeTestPublishable:
+      stripePublishableMode() === "test" || development,
     stripeWebhook:
       Boolean(process.env.STRIPE_WEBHOOK_SECRET?.startsWith("whsec_")) ||
       development,
@@ -60,10 +58,9 @@ export async function GET() {
   return Response.json(
     {
       status: ready ? "ready" : "degraded",
-      paymentMode: "demo",
+      paymentMode: "stripe-test-embedded",
       checks: {
         ...checks,
-        ...optionalChecks,
         databaseReachable,
         databaseSchemaReady,
         databaseTls,
