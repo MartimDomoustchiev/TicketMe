@@ -15,7 +15,12 @@ test("external catalogue listings cannot allocate or reserve local inventory", a
     process.chdir(isolatedCwd);
     const store = await import("../src/lib/store-file");
 
-    for (const event of [EVENT, CATALOG_EVENTS[1]]) {
+    const externalSeed = CATALOG_EVENTS.find(
+      (event) => event.saleMode === "external" && event.id !== EVENT.id,
+    );
+    assert.ok(externalSeed);
+
+    for (const event of [EVENT, externalSeed]) {
       const availability = await store.getAvailability(event.id);
       assert.equal(availability.totalCapacity, 0);
       assert.equal(availability.totalRemaining, 0);

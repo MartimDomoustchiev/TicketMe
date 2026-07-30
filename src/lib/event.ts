@@ -449,6 +449,79 @@ function normalizeSeed(seed: EventSeed): CatalogEvent {
 const FEATURED_STARTS_AT = "2026-09-29T20:00:00+03:00";
 const FEATURED_IMAGE = "/events/deep-purple.webp";
 
+const TICKETME_LIVE_STARTS_AT = "2027-02-27T19:30:00+02:00";
+const TICKETME_LIVE_IMAGE = "/events/ticketme-live-2027.svg";
+
+/**
+ * First-party inventory used by the complete TicketMe checkout flow.
+ *
+ * Third-party discoveries below remain source-only: having an event in the
+ * catalogue never grants TicketMe permission to sell it. Keeping first-party
+ * commerce explicit also gives the inventory service a trustworthy capacity
+ * source instead of inventing availability for scraped listings.
+ */
+export const PRIMARY_SALE_EVENT: CatalogEvent = {
+  id: "ticketme-live-next-wave-2027",
+  slug: "ticketme-live-next-wave-2027",
+  title: "TicketMe Live: The Next Wave",
+  name: "TicketMe Live: The Next Wave",
+  tagline: "Нова българска музика, визуални изкуства и една незабравима вечер.",
+  description:
+    "TicketMe Live: The Next Wave е оригинално събитие на TicketMe, което събира изгряващи български артисти, аудио-визуални пърформанси и специални гости на една сцена. Всеки билет е персонален, издава се след потвърдено плащане и включва защитен QR код за еднократен вход.",
+  category: "Concerts",
+  city: "София",
+  venue: "John Atanasoff Forum",
+  address: "Sofia Tech Park, бул. „Цариградско шосе“ 111Г, София",
+  startsAt: TICKETME_LIVE_STARTS_AT,
+  date: formatEventDate(TICKETME_LIVE_STARTS_AT),
+  time: formatEventTime(TICKETME_LIVE_STARTS_AT),
+  priceFrom: 39,
+  priceLabel: "от €39",
+  priceAvailable: true,
+  currency: EUR_CURRENCY,
+  image: TICKETME_LIVE_IMAGE,
+  heroImage: TICKETME_LIVE_IMAGE,
+  ticketTypes: [
+    {
+      id: "fan",
+      label: "Fan zone",
+      price: 69,
+      priceLabel: "€69",
+      currency: EUR_CURRENCY,
+      capacity: 150,
+      accent: "#0ea5e9",
+      description: "Зона пред сцената с ранен достъп до залата.",
+    },
+    {
+      id: "standard",
+      label: "Standard",
+      price: 39,
+      priceLabel: "€39",
+      currency: EUR_CURRENCY,
+      capacity: 900,
+      accent: "#2457ff",
+      description: "Пълен достъп до основната концертна зона.",
+    },
+    {
+      id: "premium",
+      label: "Premium",
+      price: 109,
+      priceLabel: "€109",
+      currency: EUR_CURRENCY,
+      capacity: 100,
+      accent: "#8b5cf6",
+      description: "Приоритетен вход, премиум зона и гардероб.",
+    },
+  ],
+  sourceName: "TicketMe",
+  sourceUrl:
+    "https://www.ticketme.store/events/ticketme-live-next-wave-2027",
+  saleMode: "internal",
+  sourceOfficial: true,
+  featured: true,
+  bangerScore: 100,
+};
+
 export const EVENT: CatalogEvent = {
   id: "deep-purple-live-sofia-2026",
   slug: "deep-purple-live-sofia-2026",
@@ -480,6 +553,7 @@ export const EVENT: CatalogEvent = {
 };
 
 export const CATALOG_EVENTS: readonly CatalogEvent[] = [
+  PRIMARY_SALE_EVENT,
   EVENT,
   ...EVENT_SEEDS.map(normalizeSeed),
 ];

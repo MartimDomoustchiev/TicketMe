@@ -5,6 +5,7 @@ import {
   isTicketTypeId,
 } from "@/lib/event";
 import { consumeRateLimit, requestIdentity } from "@/lib/rate-limit";
+import { isSameOriginRequest } from "@/lib/request-security";
 import { getBaseUrl } from "@/lib/site";
 import {
   attachCheckoutSession,
@@ -72,6 +73,10 @@ export async function POST(request: Request) {
     });
   }
 
+  if (!isSameOriginRequest(request)) {
+    return checkoutError(errorCopy.invalidOrigin, 403);
+  }
+
   const session = await getBuyerSession();
   if (!session) {
     return checkoutError(errorCopy.signIn, 401);
@@ -81,11 +86,7 @@ export async function POST(request: Request) {
     return checkoutError(errorCopy.unavailable, 503, { "Retry-After": "30" });
   }
 
-  const requestOrigin = request.headers.get("origin");
   const baseUrl = getBaseUrl(request);
-  if (requestOrigin && requestOrigin !== new URL(baseUrl).origin) {
-    return checkoutError(errorCopy.invalidOrigin, 403);
-  }
 
   const eventId = typeof body?.eventId === "string" ? body.eventId : "";
   const ticketTypeId = body?.ticketType;

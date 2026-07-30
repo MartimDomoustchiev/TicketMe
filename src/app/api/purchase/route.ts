@@ -9,6 +9,7 @@ import {
 import { createTicketPdf } from "@/lib/pdf";
 import { enqueuePurchase } from "@/lib/queue";
 import { consumeRateLimit, requestIdentity } from "@/lib/rate-limit";
+import { isSameOriginRequest } from "@/lib/request-security";
 import { getBaseUrl } from "@/lib/site";
 import {
   issueTicket,
@@ -28,6 +29,13 @@ type PurchaseBody = {
 };
 
 export async function POST(request: Request) {
+  if (!isSameOriginRequest(request)) {
+    return Response.json(
+      { error: "Невалиден източник на заявката." },
+      { status: 403 },
+    );
+  }
+
   if (isStripeConfigured() || process.env.NODE_ENV === "production") {
     return Response.json(
       {

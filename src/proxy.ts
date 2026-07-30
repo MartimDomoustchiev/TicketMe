@@ -13,10 +13,10 @@ import {
 
 const ONE_YEAR_SECONDS = 60 * 60 * 24 * 365;
 
-// OpenNext currently supports the Edge middleware convention, while Next.js
-// 16's replacement `proxy.ts` always uses the unsupported Node middleware
-// runtime. Keep this compatibility entry point Web API-only.
-export function middleware(request: NextRequest) {
+// Next.js 16 renamed Middleware to Proxy. Keep this request-boundary logic
+// limited to locale redirects and rewrites; authorization remains inside the
+// pages and route handlers that access protected data.
+export function proxy(request: NextRequest) {
   const { pathname, search } = request.nextUrl;
   const pathLocale = localeFromPathname(pathname);
 

@@ -1,6 +1,6 @@
 import { getBuyerSession } from "@/lib/auth";
 import { consumeRateLimit, requestIdentity } from "@/lib/rate-limit";
-import { getBaseUrl } from "@/lib/site";
+import { isSameOriginRequest } from "@/lib/request-security";
 import {
   cancelCheckoutReservation,
   getCheckoutReservation,
@@ -30,11 +30,7 @@ export async function POST(request: Request) {
     );
   }
 
-  const requestOrigin = request.headers.get("origin");
-  if (
-    requestOrigin &&
-    requestOrigin !== new URL(getBaseUrl(request)).origin
-  ) {
+  if (!isSameOriginRequest(request)) {
     return Response.json({ error: "Invalid request origin." }, { status: 403 });
   }
 

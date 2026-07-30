@@ -5,6 +5,7 @@ import {
   CATALOG_EVENTS,
   EVENT,
   EVENT_CATEGORIES,
+  PRIMARY_SALE_EVENT,
   formatDualCurrencyPrice,
   getCategoryImage,
   isDualPriceDisplayPeriod,
@@ -46,7 +47,12 @@ function internalEvent(startsAt: string): CatalogEvent {
 }
 
 test("static third-party catalogue is source-only and has no fabricated inventory", () => {
+  const externalEvents = CATALOG_EVENTS.filter(
+    (event) => event.saleMode === "external",
+  );
+
   assert.ok(CATALOG_EVENTS.length >= 100);
+  assert.ok(externalEvents.length >= 100);
   assert.equal(
     new Set(CATALOG_EVENTS.map((event) => event.id)).size,
     CATALOG_EVENTS.length,
@@ -64,7 +70,7 @@ test("static third-party catalogue is source-only and has no fabricated inventor
     EVENT_CATEGORIES.length,
   );
 
-  for (const event of CATALOG_EVENTS) {
+  for (const event of externalEvents) {
     assert.ok(event.title.trim().length > 0);
     assert.ok(event.venue.trim().length > 0);
     assert.ok(event.city.trim().length > 0);
@@ -89,6 +95,29 @@ test("static third-party catalogue is source-only and has no fabricated inventor
       assert.equal(event.sourceOfficial, false);
     }
   }
+});
+
+test("first-party event exposes explicit organizer inventory for Checkout", () => {
+  const now = new Date("2026-07-30T12:00:00+03:00");
+
+  assert.equal(PRIMARY_SALE_EVENT.saleMode, "internal");
+  assert.equal(PRIMARY_SALE_EVENT.sourceName, "TicketMe");
+  assert.equal(PRIMARY_SALE_EVENT.sourceOfficial, true);
+  assert.equal(PRIMARY_SALE_EVENT.priceAvailable, true);
+  assert.equal(PRIMARY_SALE_EVENT.currency, "EUR");
+  assert.equal(PRIMARY_SALE_EVENT.ticketTypes.length, 3);
+  assert.deepEqual(
+    PRIMARY_SALE_EVENT.ticketTypes.map((type) => type.id),
+    ["fan", "standard", "premium"],
+  );
+  assert.equal(
+    PRIMARY_SALE_EVENT.ticketTypes.reduce(
+      (total, type) => total + type.capacity,
+      0,
+    ),
+    1_150,
+  );
+  assert.equal(isEventOpenForInternalSale(PRIMARY_SALE_EVENT, now), true);
 });
 
 test("ticket type and sale eligibility checks fail closed", () => {
@@ -147,7 +176,13 @@ test("EUR prices include equally prominent fixed-rate BGN through 8 August 2026"
     /€50\.00.*\/.*97\.79/,
   );
   assert.equal(
-    formatPrice(CATALOG_EVENTS.find((item) => item.id !== EVENT.id)!, "en", during),
+    formatPrice(
+      CATALOG_EVENTS.find(
+        (item) => item.saleMode === "external" && item.id !== EVENT.id,
+      )!,
+      "en",
+      during,
+    ),
     "Event source",
   );
 });

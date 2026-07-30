@@ -1,0 +1,71 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 1000" role="img" aria-labelledby="title description">
+  <title id="title">TicketMe Live: The Next Wave</title>
+  <desc id="description">Abstract electric blue concert poster for TicketMe Live 2027.</desc>
+  <defs>
+    <linearGradient id="background" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#050b20"/>
+      <stop offset=".48" stop-color="#101d55"/>
+      <stop offset="1" stop-color="#090d25"/>
+    </linearGradient>
+    <radialGradient id="blue-glow" cx="50%" cy="50%" r="50%">
+      <stop offset="0" stop-color="#2f6bff" stop-opacity=".95"/>
+      <stop offset=".55" stop-color="#2457ff" stop-opacity=".35"/>
+      <stop offset="1" stop-color="#2457ff" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="violet-glow" cx="50%" cy="50%" r="50%">
+      <stop offset="0" stop-color="#b13cff" stop-opacity=".8"/>
+      <stop offset="1" stop-color="#b13cff" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="wave" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#20d9ff"/>
+      <stop offset=".5" stop-color="#5271ff"/>
+      <stop offset="1" stop-color="#d450ff"/>
+    </linearGradient>
+    <filter id="blur">
+      <feGaussianBlur stdDeviation="44"/>
+    </filter>
+    <filter id="soft-glow">
+      <feGaussianBlur stdDeviation="8" result="blurred"/>
+      <feMerge>
+        <feMergeNode in="blurred"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+    <pattern id="grid" width="64" height="64" patternUnits="userSpaceOnUse">
+      <path d="M64 0H0V64" fill="none" stroke="#8aa5ff" stroke-opacity=".08" stroke-width="1"/>
+    </pattern>
+  </defs>
+
+  <rect width="1600" height="1000" fill="url(#background)"/>
+  <rect width="1600" height="1000" fill="url(#grid)"/>
+  <circle cx="1210" cy="220" r="440" fill="url(#blue-glow)" filter="url(#blur)"/>
+  <circle cx="240" cy="780" r="360" fill="url(#violet-glow)" filter="url(#blur)"/>
+
+  <g opacity=".28" fill="none" stroke="url(#wave)" stroke-width="5">
+    <path d="M-90 660C140 465 310 860 535 625S930 380 1175 610s390 55 545-115"/>
+    <path d="M-90 720C140 525 310 920 535 685S930 440 1175 670s390 55 545-115"/>
+    <path d="M-90 600C140 405 310 800 535 565S930 320 1175 550s390 55 545-115"/>
+  </g>
+
+  <g transform="translate(112 100)">
+    <g filter="url(#soft-glow)">
+      <path d="M0 8h54c22 0 40 18 40 40v8c0 22-18 40-40 40H0V70h20V34H0V8Zm54 26H46v36h8c8 0 14-6 14-14v-8c0-8-6-14-14-14Z" fill="#fff"/>
+    </g>
+    <text x="122" y="73" fill="#fff" font-family="Arial, Helvetica, sans-serif" font-size="58" font-weight="800" letter-spacing="-2">TicketMe</text>
+  </g>
+
+  <g transform="translate(112 340)">
+    <text fill="#8fb1ff" font-family="Arial, Helvetica, sans-serif" font-size="28" font-weight="700" letter-spacing="8">TICKETME PRESENTS</text>
+    <text y="120" fill="#fff" font-family="Arial, Helvetica, sans-serif" font-size="112" font-weight="900" letter-spacing="-5">THE NEXT</text>
+    <text y="230" fill="url(#wave)" font-family="Arial, Helvetica, sans-serif" font-size="112" font-weight="900" letter-spacing="-5">WAVE</text>
+    <rect y="282" width="735" height="2" fill="#fff" opacity=".2"/>
+    <text y="338" fill="#fff" font-family="Arial, Helvetica, sans-serif" font-size="31" font-weight="700" letter-spacing="2">27 FEB 2027 · SOFIA TECH PARK</text>
+  </g>
+
+  <g transform="translate(1220 690)" opacity=".85">
+    <circle r="175" fill="none" stroke="#fff" stroke-opacity=".14" stroke-width="2"/>
+    <circle r="124" fill="none" stroke="#fff" stroke-opacity=".2" stroke-width="2"/>
+    <circle r="73" fill="none" stroke="url(#wave)" stroke-width="12" stroke-dasharray="56 22"/>
+    <circle r="18" fill="#fff"/>
+  </g>
+</svg>

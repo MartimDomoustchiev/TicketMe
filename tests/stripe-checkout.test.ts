@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   EVENT,
+  PRIMARY_SALE_EVENT,
   type CatalogEvent,
   type TicketType,
 } from "../src/lib/event";
@@ -62,6 +63,31 @@ test("hosted Checkout restricts payment methods to immediate card wallets", () =
   assert.deepEqual(lineItems[0]?.price_data?.product_data?.images, [
     new URL(INTERNAL_EVENT.image, "https://tickets.example/").href,
   ]);
+});
+
+test("first-party sale event produces the configured Checkout amount and metadata", () => {
+  const standard = PRIMARY_SALE_EVENT.ticketTypes.find(
+    (ticketType) => ticketType.id === "standard",
+  );
+  assert.ok(standard);
+
+  const params = buildStripeCheckoutSessionParams({
+    baseUrl: "https://www.ticketme.store",
+    event: PRIMARY_SALE_EVENT,
+    expiresAtUnix: 1_800_000_000,
+    locale: "bg",
+    reservationId: "RSV-PRIMARYSALE0001",
+    ticketType: standard,
+    buyerEmail: "verified@example.com",
+  });
+  const lineItems = params.line_items;
+
+  assert.ok(Array.isArray(lineItems));
+  assert.equal(lineItems[0]?.price_data?.unit_amount, 3_900);
+  assert.equal(lineItems[0]?.price_data?.currency, "eur");
+  assert.equal(params.metadata?.eventId, PRIMARY_SALE_EVENT.id);
+  assert.equal(params.metadata?.ticketType, "standard");
+  assert.equal(params.customer_email, "verified@example.com");
 });
 
 test("Checkout rejects an event and ticket currency mismatch", () => {

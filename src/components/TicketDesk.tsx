@@ -2,6 +2,7 @@
 
 import {
   Check,
+  Clock3,
   CreditCard,
   Loader2,
   LockKeyhole,
@@ -52,6 +53,8 @@ const COPY = {
     paymentOptions: "Карта и допустими дигитални портфейли",
     walletHint:
       "Stripe Checkout показва само методите, налични за твоето устройство, държава и настройките на портфейла.",
+    reservationWindow:
+      "Избраният билет се пази 30 минути, докато завършиш плащането.",
     agreementStart: "С продължаването приемаш",
     terms: "Условията",
     and: "и",
@@ -83,6 +86,8 @@ const COPY = {
     paymentOptions: "Card and eligible digital wallets",
     walletHint:
       "Stripe Checkout only shows methods available for your device, country, and wallet setup.",
+    reservationWindow:
+      "Your selected ticket is held for 30 minutes while you complete payment.",
     agreementStart: "By continuing, you accept the",
     terms: "Terms",
     and: "and",
@@ -252,14 +257,14 @@ export function TicketDesk({
                   aria-pressed={isSelected}
                   disabled={isSoldOut}
                   onClick={() => setSelectedType(type.id)}
-                  className={`group flex min-h-28 w-full items-center gap-4 rounded-2xl border bg-white p-4 text-left transition sm:p-5 ${
+                  className={`group flex min-h-28 w-full items-start gap-3 rounded-2xl border bg-white p-4 text-left transition sm:items-center sm:gap-4 sm:p-5 ${
                     isSelected
                       ? "border-blue-600 shadow-[0_12px_35px_rgba(37,99,235,0.12)] ring-1 ring-blue-600"
                       : "border-slate-200 hover:border-slate-400 hover:shadow-md"
                   } disabled:cursor-not-allowed disabled:opacity-55`}
                 >
                   <span
-                    className={`inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full border-2 ${
+                    className={`inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full border-2 sm:h-11 sm:w-11 ${
                       isSelected
                         ? "border-blue-600 bg-blue-600 text-white"
                         : "border-slate-300 text-transparent"
@@ -268,18 +273,18 @@ export function TicketDesk({
                     <Check size={20} />
                   </span>
                   <span className="min-w-0 flex-1">
-                    <span className="block text-lg font-black text-slate-950">
-                      {TICKET_COPY[locale][type.id].label}
+                    <span className="flex min-w-0 flex-col gap-1 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
+                      <span className="block text-lg font-black text-slate-950">
+                        {TICKET_COPY[locale][type.id].label}
+                      </span>
+                      <span className="block break-words text-base font-black leading-6 text-slate-950 sm:shrink-0 sm:text-right sm:text-xl">
+                        {formatDualCurrencyPrice(type.price, locale)}
+                      </span>
                     </span>
                     <span className="mt-1 block text-sm leading-6 text-slate-500">
                       {TICKET_COPY[locale][type.id].description}
                     </span>
-                  </span>
-                  <span className="shrink-0 text-right">
-                    <span className="block text-xl font-black text-slate-950">
-                      {formatDualCurrencyPrice(type.price, locale)}
-                    </span>
-                    <span className="mt-1 block text-xs font-bold text-slate-500">
+                    <span className="mt-2 block text-xs font-bold text-slate-500">
                       {isSoldOut
                         ? copy.soldOut
                         : `${remaining} ${copy.available}`}
@@ -314,7 +319,7 @@ export function TicketDesk({
                   {copy.electronicTicket}
                 </p>
               </div>
-              <p className="font-black text-slate-950">
+              <p className="max-w-[58%] text-right text-sm font-black leading-6 text-slate-950 sm:text-base">
                 {selectedPrice}
               </p>
             </div>
@@ -322,7 +327,7 @@ export function TicketDesk({
 
           <div className="flex items-center justify-between py-4 text-lg">
             <span className="font-bold text-slate-600">{copy.total}</span>
-            <span className="text-2xl font-black text-slate-950">
+            <span className="max-w-[62%] text-right text-xl font-black leading-7 text-slate-950 sm:text-2xl">
               {selectedPrice}
             </span>
           </div>
@@ -356,12 +361,20 @@ export function TicketDesk({
                   {session.email}
                 </p>
               </div>
+              <p className="mt-4 flex items-start gap-2 rounded-2xl border border-blue-100 bg-blue-50 p-3.5 text-xs font-bold leading-5 text-blue-900">
+                <Clock3
+                  size={16}
+                  className="mt-0.5 shrink-0 text-blue-600"
+                  aria-hidden="true"
+                />
+                {copy.reservationWindow}
+              </p>
               <button
                 type="button"
                 onClick={buyTicket}
                 disabled={isBuying || selectedRemaining <= 0}
                 aria-busy={isBuying}
-                className="mt-4 inline-flex h-13 w-full items-center justify-center gap-2 rounded-2xl bg-blue-600 px-5 font-black text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-55"
+                className="mt-3 inline-flex h-13 w-full items-center justify-center gap-2 rounded-2xl bg-blue-600 px-5 font-black text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-55"
               >
                 {isBuying ? (
                   <Loader2 className="animate-spin" size={19} />
