@@ -1,9 +1,11 @@
 import {
   CalendarDays,
   Download,
+  ExternalLink,
   MapPin,
   ShieldCheck,
   Ticket,
+  TriangleAlert,
 } from "lucide-react";
 import Link from "next/link";
 import { redirect } from "next/navigation";
@@ -46,7 +48,9 @@ export default async function MyTicketsPage() {
 
   const tickets = await listTicketsByEmail(session.email);
   const checkedIn = tickets.filter(
-    (ticket) => ticket.status === "checked_in",
+    (ticket) =>
+      ticket.status === "checked_in" &&
+      getEventById(ticket.eventId)?.checkoutMode !== "test-simulation",
   ).length;
 
   return (
@@ -121,6 +125,9 @@ export default async function MyTicketsPage() {
                     ticket.eventId,
                     ticket.ticketType,
                   );
+                  const simulation =
+                    event?.checkoutMode === "test-simulation";
+                  const sourceUrl = safeSourceUrl(event?.sourceUrl);
 
                   return (
                     <article
@@ -132,12 +139,19 @@ export default async function MyTicketsPage() {
                           <div>
                             <span
                               className={`inline-flex rounded-full px-2.5 py-1 text-xs font-black ${
-                                ticket.status === "checked_in"
+                                simulation
+                                  ? "bg-amber-50 text-amber-900"
+                                  : ticket.status === "checked_in"
                                   ? "bg-slate-100 text-slate-600"
                                   : "bg-emerald-50 text-emerald-800"
                               }`}
                             >
-                              {ticket.status === "checked_in"
+                              {simulation ? (
+                                <span className="inline-flex items-center gap-1.5">
+                                  <TriangleAlert size={13} aria-hidden="true" />
+                                  {copy.testStatus}
+                                </span>
+                              ) : ticket.status === "checked_in"
                                 ? copy.usedStatus
                                 : copy.validStatus}
                             </span>
@@ -179,12 +193,17 @@ export default async function MyTicketsPage() {
                               {copy.category}
                             </dt>
                             <dd className="mt-1 font-black">
-                              {ticketTypeLabel(ticket.ticketType, locale, type.label)}
+                              {ticketTypeLabel(
+                                ticket.ticketType,
+                                locale,
+                                type.label,
+                                simulation,
+                              )}
                             </dd>
                           </div>
                           <div>
                             <dt className="text-xs font-bold uppercase tracking-wide text-slate-500">
-                              {copy.seat}
+                              {simulation ? copy.reference : copy.seat}
                             </dt>
                             <dd className="mt-1 font-black">
                               {ticket.seatLabel}
@@ -238,7 +257,18 @@ export default async function MyTicketsPage() {
                       </div>
 
                       {event && (
-                        <div className="border-t border-slate-100 bg-slate-50 px-5 py-3 text-right">
+                        <div className="flex flex-wrap items-center justify-end gap-4 border-t border-slate-100 bg-slate-50 px-5 py-3 text-right">
+                          {simulation && sourceUrl && (
+                            <a
+                              href={sourceUrl}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="inline-flex items-center gap-1 text-xs font-black text-[#2457ff] hover:text-blue-800"
+                            >
+                              {copy.source(event.sourceName)}
+                              <ExternalLink size={13} aria-hidden="true" />
+                            </a>
+                          )}
                           <Link
                             href={localizeHref(
                               locale,
@@ -268,8 +298,9 @@ function ticketTypeLabel(
   type: "fan" | "standard" | "premium",
   locale: "bg" | "en",
   fallback: string,
+  simulation = false,
 ): string {
-  if (locale === "bg") return fallback;
+  if (simulation || locale === "bg") return fallback;
   return {
     fan: "Fan zone",
     standard: "Standard",
@@ -293,12 +324,15 @@ const ACCOUNT_COPY = {
     findMore: "Намери още събития",
     usedStatus: "Използван",
     validStatus: "Валиден",
+    testStatus: "Тестов - не важи за вход",
     category: "Категория",
     seat: "Място",
+    reference: "Референция",
     price: "Цена",
     issued: "Издаден",
     details: "Детайли",
     eventPage: "Към страницата на събитието",
+    source: (source: string) => `Източник: ${source}`,
   },
   en: {
     verifiedProfile: "Verified account",
@@ -315,14 +349,32 @@ const ACCOUNT_COPY = {
     findMore: "Find more events",
     usedStatus: "Used",
     validStatus: "Valid",
+    testStatus: "Test - not valid for entry",
     category: "Category",
     seat: "Seat",
+    reference: "Reference",
     price: "Price",
     issued: "Issued",
     details: "Details",
     eventPage: "View event page",
+    source: (source: string) => `Source: ${source}`,
   },
 } as const;
+
+function safeSourceUrl(value: string | undefined): string | null {
+  if (!value) {
+    return null;
+  }
+
+  try {
+    const url = new URL(value);
+    return url.protocol === "https:" && !url.username && !url.password
+      ? url.href
+      : null;
+  } catch {
+    return null;
+  }
+}
 
 function Stat({ label, value }: { label: string; value: string }) {
   return (

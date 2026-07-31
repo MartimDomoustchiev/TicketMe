@@ -105,6 +105,49 @@ function safeSubjectValue(value: string): string {
   return value.replace(/[\r\n]+/g, " ").trim().slice(0, 160);
 }
 
+function safeHttpsUrl(value: string | undefined): string | null {
+  if (!value?.trim()) {
+    return null;
+  }
+
+  try {
+    const url = new URL(value);
+    if (url.protocol !== "https:" || url.username || url.password) {
+      return null;
+    }
+    return url.href;
+  } catch {
+    return null;
+  }
+}
+
+function formatPaymentAmount(input: {
+  unitAmountMinor?: number;
+  currency?: string;
+  locale: "bg" | "en";
+}): string | null {
+  const currency = input.currency?.trim().toUpperCase();
+  if (
+    !Number.isSafeInteger(input.unitAmountMinor) ||
+    (input.unitAmountMinor ?? -1) < 0 ||
+    !currency ||
+    !/^[A-Z]{3}$/.test(currency)
+  ) {
+    return null;
+  }
+
+  try {
+    return new Intl.NumberFormat(input.locale === "en" ? "en-GB" : "bg-BG", {
+      style: "currency",
+      currency,
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    }).format((input.unitAmountMinor as number) / 100);
+  } catch {
+    return null;
+  }
+}
+
 function emailDocument(input: {
   locale: "bg" | "en";
   preheader: string;
@@ -299,38 +342,108 @@ export async function sendTicketEmail(input: {
   downloadUrl: string;
   pdf: Uint8Array;
   locale?: "bg" | "en";
+  offerKind?: "admission" | "test-simulation";
+  sourceName?: string;
+  sourceUrl?: string;
+  ticketLabel?: string;
+  unitAmountMinor?: number;
+  currency?: string;
 }): Promise<void> {
   const safeName = escapeHtml(input.name);
   const safeUrl = escapeHtml(input.downloadUrl);
   const safeEventName = escapeHtml(input.eventName);
   const isEnglish = input.locale === "en";
   const locale = isEnglish ? "en" : "bg";
+  const simulation = input.offerKind === "test-simulation";
   const subjectEventName = safeSubjectValue(input.eventName);
   const subjectTicketId = safeSubjectValue(input.ticketId);
+  const sourceUrl = safeHttpsUrl(input.sourceUrl);
+  const sourceName = escapeHtml(
+    safeSubjectValue(
+      input.sourceName || (isEnglish ? "event source" : "източника на събитието"),
+    ),
+  );
+  const sourceReference = sourceUrl
+    ? `<a href="${escapeHtml(sourceUrl)}" style="color:#2457ff;text-decoration:underline;">${sourceName}</a>`
+    : sourceName;
+  const paymentAmount = formatPaymentAmount({
+    unitAmountMinor: input.unitAmountMinor,
+    currency: input.currency,
+    locale,
+  });
+  const safeTicketLabel = input.ticketLabel
+    ? escapeHtml(safeSubjectValue(input.ticketLabel))
+    : null;
+  const simulationDetails = [
+    paymentAmount,
+    safeTicketLabel,
+  ].filter((value): value is string => Boolean(value));
+  const simulationDetailsText = simulationDetails.length
+    ? ` (${simulationDetails.join(" · ")})`
+    : "";
+
   await sendEmail({
     to: input.to,
     idempotencyKey: `ticket-delivery/${input.ticketId}`,
-    subject: isEnglish
-      ? `Ticket ${subjectTicketId} for ${subjectEventName}`
-      : `Билет ${subjectTicketId} за ${subjectEventName}`,
+    subject: simulation
+      ? isEnglish
+        ? `Test payment record ${subjectTicketId} for ${subjectEventName}`
+        : `Запис за тестово плащане ${subjectTicketId} за ${subjectEventName}`
+      : isEnglish
+        ? `Ticket ${subjectTicketId} for ${subjectEventName}`
+        : `Билет ${subjectTicketId} за ${subjectEventName}`,
     html: emailDocument({
       locale,
-      preheader: isEnglish
-        ? `Your PDF ticket for ${safeEventName} is ready.`
-        : `PDF билетът ти за ${safeEventName} е готов.`,
-      eyebrow: isEnglish ? "Purchase confirmed" : "Успешно издаден билет",
-      title: isEnglish ? `Your ticket is ready, ${safeName}` : `Готово, ${safeName}`,
-      introduction: isEnglish
-        ? `Your official ticket for <strong style="color:#10172a;">${safeEventName}</strong> is attached as a PDF. Keep its QR code private and present it at the entrance.`
-        : `Официалният ти билет за <strong style="color:#10172a;">${safeEventName}</strong> е прикачен като PDF. Пази QR кода личен и го представи на входа.`,
-      actionLabel: isEnglish ? "Open my ticket" : "Отвори моя билет",
+      preheader: simulation
+        ? isEnglish
+          ? `Your Stripe test payment record for ${safeEventName} is ready and is not valid for entry.`
+          : `Записът за тестово Stripe плащане за ${safeEventName} е готов и не важи за вход.`
+        : isEnglish
+          ? `Your PDF ticket for ${safeEventName} is ready.`
+          : `PDF билетът ти за ${safeEventName} е готов.`,
+      eyebrow: simulation
+        ? isEnglish
+          ? "Stripe test payment confirmed"
+          : "Потвърдено тестово Stripe плащане"
+        : isEnglish
+          ? "Purchase confirmed"
+          : "Успешно издаден билет",
+      title: simulation
+        ? isEnglish
+          ? `Your test payment record is ready, ${safeName}`
+          : `Записът за тестовото плащане е готов, ${safeName}`
+        : isEnglish
+          ? `Your ticket is ready, ${safeName}`
+          : `Готово, ${safeName}`,
+      introduction: simulation
+        ? isEnglish
+          ? `The attached PDF records a Stripe test-mode payment for <strong style="color:#10172a;">${safeEventName}</strong>${simulationDetailsText}. No real funds were charged. This is not a venue admission ticket and is not valid for entry.`
+          : `Прикаченият PDF удостоверява тестово Stripe плащане за <strong style="color:#10172a;">${safeEventName}</strong>${simulationDetailsText}. Не са таксувани реални средства. Това не е билет за събитието и не важи за вход.`
+        : isEnglish
+          ? `Your official ticket for <strong style="color:#10172a;">${safeEventName}</strong> is attached as a PDF. Keep its QR code private and present it at the entrance.`
+          : `Официалният ти билет за <strong style="color:#10172a;">${safeEventName}</strong> е прикачен като PDF. Пази QR кода личен и го представи на входа.`,
+      actionLabel: simulation
+        ? isEnglish
+          ? "Open test payment PDF"
+          : "Отвори PDF за тестовото плащане"
+        : isEnglish
+          ? "Open my ticket"
+          : "Отвори моя билет",
       actionUrl: safeUrl,
-      secondaryText: isEnglish
-        ? "The same ticket is stored securely in your TicketMe account. If the button does not open, use the link below."
-        : "Същият билет е съхранен сигурно в TicketMe профила ти. Ако бутонът не се отвори, използвай адреса по-долу.",
-      footerText: isEnglish
-        ? `Ticket ID: ${escapeHtml(input.ticketId)} · One-time admission · Do not forward this email or share the QR code.`
-        : `Номер на билет: ${escapeHtml(input.ticketId)} · Еднократен вход · Не препращай този имейл и не споделяй QR кода.`,
+      secondaryText: simulation
+        ? isEnglish
+          ? `The PDF is stored in your TicketMe account. For current event tickets, availability, and entry terms, visit ${sourceReference}.`
+          : `PDF файлът е съхранен в TicketMe профила ти. За актуални билети, наличност и условия за достъп посети ${sourceReference}.`
+        : isEnglish
+          ? "The same ticket is stored securely in your TicketMe account. If the button does not open, use the link below."
+          : "Същият билет е съхранен сигурно в TicketMe профила ти. Ако бутонът не се отвори, използвай адреса по-долу.",
+      footerText: simulation
+        ? isEnglish
+          ? `Test record ID: ${escapeHtml(input.ticketId)} · Not valid for entry · The QR code verifies only this test transaction.`
+          : `Номер на тестов запис: ${escapeHtml(input.ticketId)} · Не важи за вход · QR кодът потвърждава само тестовата транзакция.`
+        : isEnglish
+          ? `Ticket ID: ${escapeHtml(input.ticketId)} · One-time admission · Do not forward this email or share the QR code.`
+          : `Номер на билет: ${escapeHtml(input.ticketId)} · Еднократен вход · Не препращай този имейл и не споделяй QR кода.`,
     }),
     attachment: {
       filename: `${input.ticketId}.pdf`,

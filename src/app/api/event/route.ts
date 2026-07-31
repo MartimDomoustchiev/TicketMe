@@ -1,8 +1,5 @@
-import {
-  findCatalogEventById,
-  isInternallySoldEvent,
-} from "@/lib/catalog";
-import { EVENT } from "@/lib/event";
+import { findCatalogEventById } from "@/lib/catalog";
+import { EVENT, isEventOpenForTicketMeCheckout } from "@/lib/event";
 import {
   getAvailability,
   getPurchaseActivity,
@@ -21,8 +18,8 @@ export async function GET(request: Request) {
     return Response.json({ error: "Event not found" }, { status: 404 });
   }
 
-  const internalSale = isInternallySoldEvent(event);
-  const [availability, activity] = internalSale
+  const checkoutEnabled = isEventOpenForTicketMeCheckout(event);
+  const [availability, activity] = checkoutEnabled
     ? await Promise.all([
         getAvailability(event.id),
         getPurchaseActivity(event.id),

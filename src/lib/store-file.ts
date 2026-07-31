@@ -997,6 +997,34 @@ export async function listCheckoutReservationsForReconciliation(
     .map(publicReservation);
 }
 
+export async function listTicketDeliveriesForRetry(
+  limit = 5,
+): Promise<CheckoutReservation[]> {
+  const boundedLimit = Number.isFinite(limit)
+    ? Math.max(1, Math.min(20, Math.floor(limit)))
+    : 5;
+  const now = Date.now();
+  const state = await readState();
+
+  return Object.values(state.checkoutReservations)
+    .filter(
+      (reservation) =>
+        reservation.status === "fulfilled" &&
+        Boolean(reservation.ticketId) &&
+        (reservation.deliveryStatus === "pending" ||
+          (reservation.deliveryStatus === "processing" &&
+            (!reservation.deliveryLeaseExpiresAt ||
+              Date.parse(reservation.deliveryLeaseExpiresAt) <= now))),
+    )
+    .sort((left, right) => {
+      const leftOldest = Date.parse(left.fulfilledAt ?? left.createdAt);
+      const rightOldest = Date.parse(right.fulfilledAt ?? right.createdAt);
+      return leftOldest - rightOldest || left.id.localeCompare(right.id);
+    })
+    .slice(0, boundedLimit)
+    .map(publicReservation);
+}
+
 export async function fulfillCheckoutReservation(
   input: FulfillCheckoutReservationInput,
 ): Promise<CheckoutFulfillmentResult | null> {

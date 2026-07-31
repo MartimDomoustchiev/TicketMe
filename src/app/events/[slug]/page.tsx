@@ -3,6 +3,7 @@ import {
   CalendarDays,
   ChevronRight,
   Clock3,
+  ExternalLink,
   MailCheck,
   MapPin,
   QrCode,
@@ -30,16 +31,19 @@ import {
 import { getBuyerSession } from "@/lib/auth";
 import {
   findCatalogEventBySlug,
-  isInternallySoldEvent,
   listRelatedCatalogEvents,
 } from "@/lib/catalog";
+import {
+  isEventOpenForTicketMeCheckout,
+  isTestSimulationEvent,
+} from "@/lib/event";
 import { getLocale, localizeHref } from "@/lib/i18n";
 import {
   getPublicAvailability,
   getPublicPurchaseActivity,
 } from "@/lib/public-availability";
 import { getBaseUrl } from "@/lib/site";
-import { stripeMode } from "@/lib/stripe";
+import { getStripePublishableKey, stripeMode } from "@/lib/stripe";
 import { getEventVisual } from "@/lib/event-visual";
 
 export const dynamic = "force-dynamic";
@@ -82,7 +86,8 @@ export default async function EventPage({ params }: EventPageProps) {
     notFound();
   }
 
-  const internalSale = isInternallySoldEvent(event);
+  const checkoutEnabled = isEventOpenForTicketMeCheckout(event);
+  const testSimulation = isTestSimulationEvent(event);
   const visual = getEventVisual(event);
   const [
     availability,
@@ -91,13 +96,13 @@ export default async function EventPage({ params }: EventPageProps) {
     locale,
     relatedEvents,
   ] = await Promise.all([
-    internalSale
+    checkoutEnabled
       ? getPublicAvailability(event.id)
       : Promise.resolve(null),
-    internalSale
+    checkoutEnabled
       ? getPublicPurchaseActivity(event.id)
       : Promise.resolve({ queueDepth: 0, activeCheckouts: 0 }),
-    internalSale
+    checkoutEnabled
       ? getBuyerSession().catch(() => null)
       : Promise.resolve(null),
     getLocale(),
@@ -127,7 +132,7 @@ export default async function EventPage({ params }: EventPageProps) {
         addressCountry: "BG",
       },
     },
-    ...(internalSale
+    ...(checkoutEnabled && !testSimulation
       ? availability
         ? {
             offers: {
@@ -146,7 +151,7 @@ export default async function EventPage({ params }: EventPageProps) {
 
   return (
     <LiveTicketingProvider
-      eventId={internalSale && availability ? event.id : null}
+      eventId={checkoutEnabled && availability ? event.id : null}
       initialAvailability={availability}
       initialActivity={purchaseActivity}
     >
@@ -260,25 +265,35 @@ export default async function EventPage({ params }: EventPageProps) {
 
           <EventPurchasePanel
             event={event}
-            internalSale={internalSale}
+            checkoutEnabled={checkoutEnabled}
             availabilityAvailable={availability !== null}
             locale={locale}
           />
         </div>
       </section>
 
-      {internalSale && (
+      {checkoutEnabled && (
         <section className="border-b border-slate-200 bg-white px-4">
           <div className="mx-auto grid max-w-7xl gap-px bg-slate-200 sm:grid-cols-2 lg:grid-cols-4">
             <TrustPoint
               icon={<ShieldCheck size={21} />}
-              title={copy.securePurchase}
-              description={copy.securePurchaseText}
+              title={testSimulation ? copy.testPayment : copy.securePurchase}
+              description={
+                testSimulation
+                  ? copy.testPaymentText
+                  : copy.securePurchaseText
+              }
             />
             <TrustPoint
               icon={<Users size={21} />}
-              title={copy.fairQueue}
-              description={copy.fairQueueText}
+              title={
+                testSimulation ? copy.testInventory : copy.fairQueue
+              }
+              description={
+                testSimulation
+                  ? copy.testInventoryText
+                  : copy.fairQueueText
+              }
             />
             <TrustPoint
               icon={<MailCheck size={21} />}
@@ -287,8 +302,12 @@ export default async function EventPage({ params }: EventPageProps) {
             />
             <TrustPoint
               icon={<QrCode size={21} />}
-              title={copy.qrEntry}
-              description={copy.qrEntryText}
+              title={testSimulation ? copy.notValidForEntry : copy.qrEntry}
+              description={
+                testSimulation
+                  ? copy.notValidForEntryText
+                  : copy.qrEntryText
+              }
             />
           </div>
         </section>
@@ -335,7 +354,7 @@ export default async function EventPage({ params }: EventPageProps) {
         </div>
       </section>
 
-      {internalSale ? (
+      {checkoutEnabled ? (
         <section className="border-y border-slate-200 bg-white px-4 py-12 sm:py-16">
           {availability ? (
             <div className="mx-auto max-w-7xl">
@@ -344,6 +363,7 @@ export default async function EventPage({ params }: EventPageProps) {
                 initialAvailability={availability}
                 initialSession={buyerSession}
                 paymentMode={stripeMode()}
+                stripePublishableKey={getStripePublishableKey()}
                 locale={locale}
               />
             </div>
@@ -367,6 +387,30 @@ export default async function EventPage({ params }: EventPageProps) {
                 {copy.backToEvents}
                 <ChevronRight size={18} aria-hidden="true" />
               </Link>
+            </div>
+          )}
+          {event.saleMode === "external" && (
+            <div className="mx-auto mt-8 flex max-w-7xl flex-col gap-5 rounded-2xl border border-blue-200 bg-blue-50 p-5 sm:flex-row sm:items-center sm:justify-between sm:p-6">
+              <div>
+                <p className="text-xs font-black uppercase tracking-[0.12em] text-blue-700">
+                  {copy.sourceAttribution}
+                </p>
+                <h2 className="mt-2 text-xl font-black text-slate-950">
+                  {event.sourceName}
+                </h2>
+                <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-600">
+                  {copy.sourceAttributionText}
+                </p>
+              </div>
+              <a
+                href={event.sourceUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex h-11 shrink-0 items-center justify-center gap-2 rounded-xl border border-blue-300 bg-white px-5 text-sm font-black text-[#2457ff] transition hover:bg-blue-100"
+              >
+                {copy.openOfficialPage}
+                <ExternalLink size={16} aria-hidden="true" />
+              </a>
             </div>
           )}
         </section>
@@ -515,12 +559,21 @@ const EVENT_COPY = {
       "Пазим системата честна и не приемаме поръчки, докато не можем да потвърдим наличността. Опитай отново след малко.",
     securePurchase: "Защитена покупка",
     securePurchaseText: "Надеждна обработка на всяка заявка",
+    testPayment: "Stripe test плащане",
+    testPaymentText: "Не се таксуват реални средства",
     fairQueue: "Честна опашка",
     fairQueueText: "Заявките се обработват по ред",
+    testInventory: "Симулационна наличност",
+    testInventoryText: "TicketMe тестови бройки, не официални места",
     emailTicket: "Билет по имейл",
     emailTicketText: "PDF файл веднага след покупката",
     qrEntry: "QR вход",
     qrEntryText: "Бърза проверка на място",
+    notValidForEntry: "Не важи за вход",
+    notValidForEntryText: "Тестовият PDF демонстрира издаването на билет",
+    sourceAttribution: "Източник на информацията за събитието",
+    sourceAttributionText:
+      "Програмата, мястото и датата са атрибутирани към посочения външен източник. TicketMe Stripe test плащането е отделна симулация и не купува билет от организатора.",
     aboutEvent: "За събитието",
     venueAndTime: "Място и час",
     date: "Дата",
@@ -558,12 +611,21 @@ const EVENT_COPY = {
       "To keep allocation fair, we do not accept orders while live inventory cannot be confirmed. Please try again shortly.",
     securePurchase: "Secure booking",
     securePurchaseText: "Reliable handling of every request",
+    testPayment: "Stripe test payment",
+    testPaymentText: "No real funds are charged",
     fairQueue: "Fair queue",
     fairQueueText: "Requests are processed in order",
+    testInventory: "Simulation inventory",
+    testInventoryText: "TicketMe test counts, not official venue seats",
     emailTicket: "Ticket by email",
     emailTicketText: "PDF delivered immediately after booking",
     qrEntry: "QR admission",
     qrEntryText: "Fast validation at the venue",
+    notValidForEntry: "Not valid for entry",
+    notValidForEntryText: "The test PDF demonstrates ticket issuance only",
+    sourceAttribution: "Event information source",
+    sourceAttributionText:
+      "The programme, venue and date are attributed to the linked external source. TicketMe's Stripe test payment is a separate simulation and does not buy an organizer ticket.",
     aboutEvent: "About the event",
     venueAndTime: "Venue and time",
     date: "Date",

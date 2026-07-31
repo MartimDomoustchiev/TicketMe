@@ -24,6 +24,40 @@ export function isStripeConfigured(): boolean {
   return stripeMode() !== null;
 }
 
+export function stripePublishableMode(): StripeMode | null {
+  const key =
+    process.env.STRIPE_PUBLISHABLE_KEY ??
+    process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY;
+
+  if (key?.startsWith("pk_test_")) {
+    return "test";
+  }
+
+  if (key?.startsWith("pk_live_")) {
+    return "live";
+  }
+
+  return null;
+}
+
+export function isStripeEmbeddedConfigured(): boolean {
+  const secretMode = stripeMode();
+
+  return secretMode !== null && stripePublishableMode() === secretMode;
+}
+
+export function getStripePublishableKey(): string | null {
+  if (!isStripeEmbeddedConfigured()) {
+    return null;
+  }
+
+  return (
+    process.env.STRIPE_PUBLISHABLE_KEY ??
+    process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY ??
+    null
+  );
+}
+
 export function isStripeWebhookConfigured(): boolean {
   return Boolean(
     process.env.STRIPE_WEBHOOK_SECRET?.startsWith("whsec_"),

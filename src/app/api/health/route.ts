@@ -4,7 +4,12 @@ import {
 } from "@/lib/database";
 import { isEmailReadyForArbitraryRecipients } from "@/lib/email";
 import { resolvePublicBaseUrl } from "@/lib/site";
-import { isStripeWebhookConfigured, stripeMode } from "@/lib/stripe";
+import {
+  isStripeEmbeddedConfigured,
+  isStripeWebhookConfigured,
+  stripeMode,
+  stripePublishableMode,
+} from "@/lib/stripe";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -13,6 +18,8 @@ export async function GET() {
   const postgresConfigured = isDatabaseConfigured();
   const development = process.env.NODE_ENV !== "production";
   const configuredStripeMode = stripeMode();
+  const configuredPublishableMode = stripePublishableMode();
+  const stripeEmbedded = isStripeEmbeddedConfigured();
   const requiredChecks = {
     database: postgresConfigured || development,
     email:
@@ -25,7 +32,7 @@ export async function GET() {
           process.env.S3_SECRET_ACCESS_KEY,
       ) || development,
     publicUrl: Boolean(resolvePublicBaseUrl()) || development,
-    stripe: configuredStripeMode !== null || development,
+    stripe: stripeEmbedded || development,
   };
   const stripeWebhook = isStripeWebhookConfigured();
 
@@ -54,14 +61,19 @@ export async function GET() {
   return Response.json(
     {
       status: ready ? "ready" : "degraded",
-      paymentMode: configuredStripeMode
-        ? `stripe-hosted-${configuredStripeMode}`
+      paymentMode: stripeEmbedded && configuredStripeMode
+        ? `stripe-embedded-${configuredStripeMode}`
         : "unavailable",
       fulfillmentMode: stripeWebhook
         ? "stripe-webhook-and-success-return"
         : "stripe-success-return-and-reconciliation",
       checks: {
         ...requiredChecks,
+        stripeSecretKey: configuredStripeMode !== null,
+        stripePublishableKey: configuredPublishableMode !== null,
+        stripeKeyModesMatch:
+          configuredStripeMode !== null &&
+          configuredStripeMode === configuredPublishableMode,
         stripeWebhook,
         databaseReachable,
         databaseSchemaReady,

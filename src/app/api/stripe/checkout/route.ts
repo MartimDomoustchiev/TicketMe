@@ -1,7 +1,8 @@
 import { getBuyerSession } from "@/lib/auth";
 import {
   getEventById,
-  isEventOpenForInternalSale,
+  isEventOpenForTicketMeCheckout,
+  isTestSimulationEvent,
   isTicketTypeId,
 } from "@/lib/event";
 import { consumeRateLimit, requestIdentity } from "@/lib/rate-limit";
@@ -14,7 +15,7 @@ import {
 } from "@/lib/store";
 import {
   getStripeClient,
-  isStripeConfigured,
+  isStripeEmbeddedConfigured,
   stripeMode,
 } from "@/lib/stripe";
 import { buildStripeCheckoutSessionParams } from "@/lib/stripe-checkout";
@@ -92,7 +93,7 @@ export async function POST(request: Request) {
     return checkoutError(errorCopy.signIn, 401);
   }
 
-  if (!isStripeConfigured()) {
+  if (!isStripeEmbeddedConfigured()) {
     return checkoutError(errorCopy.unavailable, 503, { "Retry-After": "30" });
   }
 
@@ -104,10 +105,19 @@ export async function POST(request: Request) {
 
   if (
     !event ||
-    !isEventOpenForInternalSale(event) ||
+    !isEventOpenForTicketMeCheckout(event) ||
     !isTicketTypeId(ticketTypeId)
   ) {
     return checkoutError(errorCopy.eventUnavailable, 404);
+  }
+
+  // Attributed third-party listings expose only the school-project Stripe
+  // simulation. Never allow those synthetic offers to become real charges if
+  // a live Stripe key is configured later.
+  if (isTestSimulationEvent(event) && stripeMode() !== "test") {
+    return checkoutError(errorCopy.unavailable, 503, {
+      "Retry-After": "30",
+    });
   }
 
   const ticketType = event.ticketTypes.find((type) => type.id === ticketTypeId);
@@ -146,13 +156,13 @@ export async function POST(request: Request) {
         ticketType,
         buyerEmail: session.email,
       }),
-      { idempotencyKey: `ticketme-hosted-checkout-${reservation.id}` },
+      { idempotencyKey: `ticketme-embedded-checkout-${reservation.id}` },
     );
 
     stripeSessionId = checkoutSession.id;
 
-    if (!checkoutSession.url) {
-      throw new Error("STRIPE_CHECKOUT_URL_MISSING");
+    if (!checkoutSession.client_secret) {
+      throw new Error("STRIPE_CHECKOUT_CLIENT_SECRET_MISSING");
     }
 
     await attachCheckoutSession({
@@ -161,7 +171,9 @@ export async function POST(request: Request) {
     });
 
     return Response.json({
-      checkoutUrl: checkoutSession.url,
+      clientSecret: checkoutSession.client_secret,
+      checkoutSessionId: checkoutSession.id,
+      reservationId: reservation.id,
       expiresAt: reservation.expiresAt,
       mode: stripeMode(),
     });

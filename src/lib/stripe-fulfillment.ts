@@ -20,6 +20,7 @@ import {
   type StoredTicket,
 } from "@/lib/store";
 import { getStripeClient } from "@/lib/stripe";
+import { assertStripeCheckoutOfferSafety } from "@/lib/stripe-offer-safety";
 import { readTicketPdf, storeTicketPdf } from "@/lib/storage";
 
 export type CheckoutDeliveryResult = {
@@ -100,6 +101,8 @@ export async function recordPaidCheckout(
     throw new Error("CHECKOUT_EVENT_NOT_FOUND");
   }
 
+  assertStripeCheckoutOfferSafety(session, event);
+
   if (
     (session.metadata?.eventId &&
       session.metadata.eventId !== reservation.eventId) ||
@@ -161,6 +164,20 @@ export async function deliverCheckoutTicket(
   }
 
   try {
+    const event = getEventById(claim.ticket.eventId);
+    const ticketType = event?.ticketTypes.find(
+      (candidate) => candidate.id === claim.ticket.ticketType,
+    );
+    const ticketPresentation = {
+      offerKind: event?.checkoutMode,
+      sourceName: event?.sourceName,
+      sourceUrl: event?.sourceUrl,
+      ticketLabel: ticketType?.label,
+      unitAmountMinor: ticketType
+        ? Math.round(ticketType.price * 100)
+        : undefined,
+      currency: ticketType?.currency,
+    };
     const verificationUrl = `${baseUrl}/api/tickets/${claim.ticket.id}/verify?secret=${claim.ticket.qrSecret}`;
     let pdf =
       claim.ticket.storageKey &&
@@ -174,6 +191,7 @@ export async function deliverCheckoutTicket(
         ticket: claim.ticket,
         verificationUrl,
         locale: claim.reservation.locale,
+        ...ticketPresentation,
       });
     }
 
@@ -205,6 +223,7 @@ export async function deliverCheckoutTicket(
       downloadUrl: storage.storageUrl,
       pdf,
       locale: claim.reservation.locale,
+      ...ticketPresentation,
     });
 
     const completed = await completeTicketDelivery({

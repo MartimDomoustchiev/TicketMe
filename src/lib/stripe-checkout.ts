@@ -1,5 +1,9 @@
 import type Stripe from "stripe";
-import type { CatalogEvent, TicketType } from "@/lib/event";
+import {
+  isTestSimulationEvent,
+  type CatalogEvent,
+  type TicketType,
+} from "@/lib/event";
 
 type BuildStripeCheckoutParamsInput = {
   baseUrl: string;
@@ -24,9 +28,12 @@ export function buildStripeCheckoutSessionParams(
   );
   const productImages =
     productImageUrl.protocol === "https:" ? [productImageUrl.href] : undefined;
+  const testSimulation = isTestSimulationEvent(input.event);
 
   return {
     mode: "payment",
+    ui_mode: "embedded_page",
+    redirect_on_completion: "never",
     branding_settings: {
       display_name: "TicketMe",
       background_color: "#ffffff",
@@ -42,8 +49,6 @@ export function buildStripeCheckoutSessionParams(
     customer_email: input.buyerEmail,
     locale: input.locale,
     expires_at: input.expiresAtUnix,
-    success_url: `${input.baseUrl}/${input.locale}/checkout/success?session_id={CHECKOUT_SESSION_ID}`,
-    cancel_url: `${input.baseUrl}/${input.locale}/checkout/cancelled?reservation_id=${encodeURIComponent(input.reservationId)}&event=${encodeURIComponent(input.event.slug)}`,
     line_items: [
       {
         quantity: 1,
@@ -51,12 +56,17 @@ export function buildStripeCheckoutSessionParams(
           currency: input.ticketType.currency.toLowerCase(),
           unit_amount: Math.round(input.ticketType.price * 100),
           product_data: {
-            name: input.event.title,
-            description: `${input.ticketType.label} · ${input.event.venue}`,
+            name: testSimulation
+              ? `TEST TICKET — ${input.event.title}`
+              : input.event.title,
+            description: testSimulation
+              ? `${input.ticketType.label} · Stripe test payment · Not valid for venue entry`
+              : `${input.ticketType.label} · ${input.event.venue}`,
             ...(productImages ? { images: productImages } : {}),
             metadata: {
               eventId: input.event.id,
               ticketType: input.ticketType.id,
+              offerKind: input.event.checkoutMode ?? "source-only",
             },
           },
         },
@@ -66,6 +76,7 @@ export function buildStripeCheckoutSessionParams(
       reservationId: input.reservationId,
       eventId: input.event.id,
       ticketType: input.ticketType.id,
+      offerKind: input.event.checkoutMode ?? "source-only",
       locale: input.locale,
     },
     payment_intent_data: {

@@ -6,6 +6,7 @@ import {
   PDFDocument,
   type PDFFont,
   type PDFPage,
+  degrees,
   rgb,
 } from "pdf-lib";
 import QRCode from "qrcode";
@@ -54,6 +55,12 @@ export type TicketPdfInput = {
   ticket: StoredTicket;
   verificationUrl: string;
   locale?: "bg" | "en";
+  offerKind?: "admission" | "test-simulation";
+  sourceName?: string;
+  sourceUrl?: string;
+  ticketLabel?: string;
+  unitAmountMinor?: number;
+  currency?: string;
 };
 
 export type TicketPdfBounds = {
@@ -71,6 +78,7 @@ export type TicketPdfTextField = {
     | "buyerName"
     | "ticketType"
     | "admissionCode"
+    | "transactionCode"
     | "ticketId";
   sourceText: string;
   renderedLines: readonly string[];
@@ -105,9 +113,12 @@ type TicketPdfRenderResult = {
   diagnostics: TicketPdfLayoutDiagnostics;
 };
 
-const COPY = {
+const ADMISSION_COPY = {
   bg: {
     eTicket: "ОФИЦИАЛЕН Е-БИЛЕТ",
+    brandTagline: "OFFICIAL DIGITAL ADMISSION",
+    watermark: "",
+    source: "",
     entry: "ЕДНОКРАТЕН ВХОД",
     date: "ДАТА И ЧАС",
     venue: "МЯСТО",
@@ -121,6 +132,9 @@ const COPY = {
   },
   en: {
     eTicket: "OFFICIAL E-TICKET",
+    brandTagline: "OFFICIAL DIGITAL ADMISSION",
+    watermark: "",
+    source: "",
     entry: "ONE-TIME ENTRY",
     date: "DATE & TIME",
     venue: "VENUE",
@@ -132,6 +146,46 @@ const COPY = {
     scan: "SCAN AT ENTRANCE",
     note: "Valid for one admission. Keep your QR code private.",
   },
+} as const;
+
+const SIMULATION_COPY = {
+  bg: {
+    eTicket: "ТЕСТОВ PDF БИЛЕТ",
+    brandTagline: "ЗАПИС ЗА ТЕСТОВО ПЛАЩАНЕ",
+    entry: "САМО ТЕСТОВО ПЛАЩАНЕ",
+    date: "ДАТА И ЧАС",
+    venue: "МЯСТО",
+    holder: "КУПУВАЧ",
+    category: "ТИП ТЕСТОВ БИЛЕТ",
+    zoneAccess: "РЕФЕРЕНЦИЯ НА ТРАНЗАКЦИЯТА",
+    ticket: "НОМЕР НА ТЕСТОВ ЗАПИС",
+    issued: "СЪЗДАДЕН",
+    scan: "ПРОВЕРИ ТЕСТОВАТА ТРАНЗАКЦИЯ",
+    note: "Не важи за вход. QR кодът потвърждава само тестовата транзакция.",
+    watermark: "ТЕСТОВ БИЛЕТ / НЕ ВАЖИ ЗА ВХОД",
+    source: "Източник на събитието",
+  },
+  en: {
+    eTicket: "TEST PDF TICKET",
+    brandTagline: "TEST PAYMENT RECORD",
+    entry: "TEST PAYMENT ONLY",
+    date: "DATE & TIME",
+    venue: "VENUE",
+    holder: "BUYER",
+    category: "TEST TICKET TYPE",
+    zoneAccess: "TRANSACTION REFERENCE",
+    ticket: "TEST RECORD ID",
+    issued: "CREATED",
+    scan: "VERIFY TEST TRANSACTION",
+    note: "Not valid for entry. QR verifies this test transaction only.",
+    watermark: "TEST TICKET / NOT VALID FOR ENTRY",
+    source: "Event source",
+  },
+} as const;
+
+const SIMULATION_STUB_NOTE = {
+  bg: "Не важи за вход. QR: само тестова проверка.",
+  en: "Not valid for entry. QR: test verification only.",
 } as const;
 
 async function readTicketFont(
@@ -413,6 +467,7 @@ function drawBrandMark(
   font: PDFFont,
   semibold: PDFFont,
   design: TicketDesign,
+  tagline: string,
 ): void {
   page.drawRectangle({
     x: MAIN_LEFT,
@@ -447,13 +502,72 @@ function drawBrandMark(
     font: semibold,
     color: WHITE,
   });
-  page.drawText("OFFICIAL DIGITAL ADMISSION", {
+  page.drawText(tagline, {
     x: MAIN_LEFT + 38,
     y: 299,
     size: 5.3,
     font,
     color: WHITE,
     opacity: 0.72,
+  });
+}
+
+function drawSimulationWatermark(input: {
+  page: PDFPage;
+  semibold: PDFFont;
+  warning: string;
+}): void {
+  const warningColor = rgb(0.73, 0.055, 0.12);
+  const ribbon = {
+    x: 180,
+    y: 304,
+    width: MAIN_RIGHT - 180,
+    height: 23,
+  };
+  const fitted = fitText({
+    value: input.warning,
+    font: input.semibold,
+    maxWidth: ribbon.width - 18,
+    maxLines: 1,
+    maxSize: 8.4,
+    minSize: 6.2,
+    allowTruncate: false,
+  });
+  const line = fitted.lines[0] ?? input.warning;
+  const lineWidth = input.semibold.widthOfTextAtSize(line, fitted.size);
+
+  input.page.drawRectangle({
+    ...ribbon,
+    color: warningColor,
+    borderColor: WHITE,
+    borderWidth: 0.65,
+    borderOpacity: 0.55,
+  });
+  input.page.drawText(line, {
+    x: ribbon.x + Math.max(9, (ribbon.width - lineWidth) / 2),
+    y: ribbon.y + 7.2,
+    size: fitted.size,
+    font: input.semibold,
+    color: WHITE,
+  });
+
+  const diagonal = fitText({
+    value: input.warning,
+    font: input.semibold,
+    maxWidth: 540,
+    maxLines: 1,
+    maxSize: 24,
+    minSize: 17,
+    allowTruncate: false,
+  });
+  input.page.drawText(diagonal.lines[0] ?? input.warning, {
+    x: 82,
+    y: 88,
+    size: diagonal.size,
+    font: input.semibold,
+    color: warningColor,
+    opacity: 0.075,
+    rotate: degrees(17),
   });
 }
 
@@ -638,7 +752,13 @@ function drawVectorQrCode(input: {
 function ticketTypeLabel(
   ticket: StoredTicket,
   locale: "bg" | "en",
+  providedLabel?: string,
 ): string {
+  const normalizedLabel = normalizeDisplayText(providedLabel ?? "");
+  if (normalizedLabel) {
+    return normalizedLabel;
+  }
+
   if (locale === "en") {
     return {
       fan: "Fan zone",
@@ -653,7 +773,10 @@ async function renderTicketPdf(
   input: TicketPdfInput,
 ): Promise<TicketPdfRenderResult> {
   const locale = input.locale === "en" ? "en" : "bg";
-  const copy = COPY[locale];
+  const simulation = input.offerKind === "test-simulation";
+  const copy = simulation
+    ? SIMULATION_COPY[locale]
+    : ADMISSION_COPY[locale];
   const design = getTicketDesign(input.ticket.eventId, input.ticket.id);
   const fields: TicketPdfTextField[] = [];
   const pdfDoc = await PDFDocument.create({ updateMetadata: false });
@@ -662,16 +785,30 @@ async function renderTicketPdf(
     showInWindowTitleBar: true,
   });
   pdfDoc.setAuthor("TicketMe");
-  pdfDoc.setSubject("Official TicketMe digital admission ticket");
+  pdfDoc.setSubject(
+    simulation
+      ? "TicketMe test payment record - not valid for entry"
+      : "Official TicketMe digital admission ticket",
+  );
   pdfDoc.setCreator("TicketMe");
   pdfDoc.setProducer("TicketMe PDF service");
   pdfDoc.setLanguage(locale === "en" ? "en-GB" : "bg-BG");
-  pdfDoc.setKeywords([
-    "TicketMe",
-    "official event ticket",
-    "QR admission",
-    design.id,
-  ]);
+  pdfDoc.setKeywords(
+    simulation
+      ? [
+          "TicketMe",
+          "test payment record",
+          "not valid for entry",
+          "transaction verification",
+          design.id,
+        ]
+      : [
+          "TicketMe",
+          "official event ticket",
+          "QR admission",
+          design.id,
+        ],
+  );
 
   const issuedAt = new Date(input.ticket.issuedAt);
   if (!Number.isNaN(issuedAt.getTime())) {
@@ -688,7 +825,17 @@ async function renderTicketPdf(
     subset: true,
   });
   const page = pdfDoc.addPage([PAGE_WIDTH, PAGE_HEIGHT]);
-  const typeLabel = ticketTypeLabel(input.ticket, locale);
+  const typeLabel = ticketTypeLabel(
+    input.ticket,
+    locale,
+    input.ticketLabel,
+  );
+  const sourceName = normalizeDisplayText(input.sourceName ?? "");
+  const note =
+    simulation && sourceName
+      ? `${copy.note} ${copy.source}: ${sourceName}.`
+      : copy.note;
+  const stubNote = simulation ? SIMULATION_STUB_NOTE[locale] : note;
 
   page.drawRectangle({
     x: 0,
@@ -726,26 +873,34 @@ async function renderTicketPdf(
     width: STUB_X - CARD_X,
     height: HEADER_HEIGHT,
   });
-  drawBrandMark(page, font, semibold, design);
+  drawBrandMark(page, font, semibold, design, copy.brandTagline);
 
-  page.drawRectangle({
-    x: 370,
-    y: 306,
-    width: 116,
-    height: 21,
-    borderColor: WHITE,
-    borderWidth: 0.7,
-    borderOpacity: 0.36,
-    opacity: 0,
-  });
-  page.drawText(copy.eTicket, {
-    x: 382,
-    y: 312,
-    size: 6.5,
-    font: semibold,
-    color: WHITE,
-    opacity: 0.86,
-  });
+  if (simulation) {
+    drawSimulationWatermark({
+      page,
+      semibold,
+      warning: copy.watermark,
+    });
+  } else {
+    page.drawRectangle({
+      x: 370,
+      y: 306,
+      width: 116,
+      height: 21,
+      borderColor: WHITE,
+      borderWidth: 0.7,
+      borderOpacity: 0.36,
+      opacity: 0,
+    });
+    page.drawText(copy.eTicket, {
+      x: 382,
+      y: 312,
+      size: 6.5,
+      font: semibold,
+      color: WHITE,
+      opacity: 0.86,
+    });
+  }
   drawTextBlock({
     page,
     value: input.ticket.eventName,
@@ -890,7 +1045,7 @@ async function renderTicketPdf(
     minSize: 6,
     color: color(design.ink),
     allowTruncate: false,
-    key: "admissionCode",
+    key: simulation ? "transactionCode" : "admissionCode",
     fields,
   });
 
@@ -939,7 +1094,7 @@ async function renderTicketPdf(
   });
   drawTextBlock({
     page,
-    value: copy.note,
+    value: note,
     font,
     x: MAIN_LEFT,
     top: 22,
@@ -1040,7 +1195,7 @@ async function renderTicketPdf(
   });
   drawTextBlock({
     page,
-    value: copy.note,
+    value: stubNote,
     font,
     x: 530,
     top: 30,

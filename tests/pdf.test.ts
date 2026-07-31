@@ -138,6 +138,93 @@ test("generated ticket is a compact TicketMe PDF with mixed-script data", async 
   });
 });
 
+test("test-payment PDFs are visibly marked and never claim venue admission", async (context) => {
+  const cases = [
+    {
+      locale: "en" as const,
+      warning: "TEST TICKET / NOT VALID FOR ENTRY",
+      transactionCopy: "VERIFY TEST TRANSACTION",
+      forbidden: [
+        "OFFICIAL E-TICKET",
+        "OFFICIAL DIGITAL ADMISSION",
+        "ONE-TIME ENTRY",
+        "SCAN AT ENTRANCE",
+        "Valid for one admission",
+      ],
+    },
+    {
+      locale: "bg" as const,
+      warning: "ТЕСТОВ БИЛЕТ / НЕ ВАЖИ ЗА ВХОД",
+      transactionCopy: "ПРОВЕРИ ТЕСТОВАТА ТРАНЗАКЦИЯ",
+      forbidden: [
+        "ОФИЦИАЛЕН Е-БИЛЕТ",
+        "ЕДНОКРАТЕН ВХОД",
+        "СКАНИРАЙ НА ВХОДА",
+        "Важи за едно влизане",
+      ],
+    },
+  ];
+
+  for (const item of cases) {
+    const ticket = testTicket({
+      id: `TKT-TEST-SIMULATION-${item.locale.toUpperCase()}`,
+      eventName: "Source Event Test Purchase",
+      seatLabel: "TEST-TRANSACTION-REFERENCE",
+    });
+    const { pdf, diagnostics } = await createTicketPdfWithDiagnostics({
+      ticket,
+      verificationUrl:
+        "https://tickets.example.com/api/tickets/TKT-TEST-SIMULATION/verify?secret=test-secret",
+      locale: item.locale,
+      offerKind: "test-simulation",
+      sourceName: "Bilet.bg",
+      sourceUrl: "https://www.bilet.bg/bg/events/source-event",
+      ticketLabel: "Test standard",
+      unitAmountMinor: 100,
+      currency: "EUR",
+    });
+    const document = await PDFDocument.load(pdf, { updateMetadata: false });
+
+    assert.equal(document.getPageCount(), 1);
+    assert.equal(
+      document.getSubject(),
+      "TicketMe test payment record - not valid for entry",
+    );
+    assert.doesNotMatch(
+      document.getKeywords() ?? "",
+      /official|admission/i,
+    );
+    assert.ok(
+      diagnostics.fields.some((field) => field.key === "transactionCode"),
+    );
+    assert.equal(
+      diagnostics.fields.some((field) => field.key === "admissionCode"),
+      false,
+    );
+
+    const extracted = extractPdfText(pdf);
+    if (extracted === null) {
+      context.diagnostic(
+        `Poppler is unavailable; ${item.locale} simulation metadata and layout diagnostics were still verified.`,
+      );
+      continue;
+    }
+
+    const normalized = normalizeExtractedText(extracted);
+    assert.ok(normalized.includes(item.warning));
+    assert.ok(normalized.includes(item.transactionCopy));
+    assert.ok(normalized.includes("Source Event Test Purchase"));
+    assert.ok(normalized.includes("Bilet.bg"));
+    for (const unsafeCopy of item.forbidden) {
+      assert.equal(
+        normalized.includes(unsafeCopy),
+        false,
+        `${item.locale} simulation PDF must not contain ${unsafeCopy}`,
+      );
+    }
+  }
+});
+
 test("premium layout preserves critical long values and QR safety invariants", async (context) => {
   const ticket = testTicket({
     id: "TKT-LONG-MIXED-SCRIPT-00000000000001",

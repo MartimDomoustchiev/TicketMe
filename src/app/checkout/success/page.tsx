@@ -12,6 +12,7 @@ import Link from "next/link";
 import { MarketplaceFooter } from "@/components/marketplace/MarketplaceFooter";
 import { MarketplaceHeader } from "@/components/marketplace/MarketplaceHeader";
 import { getBuyerSession } from "@/lib/auth";
+import { getEventById, isTestSimulationEvent } from "@/lib/event";
 import { getLocale, localizeHref } from "@/lib/i18n";
 import { getBaseUrl } from "@/lib/site";
 import { stripeMode } from "@/lib/stripe";
@@ -115,6 +116,8 @@ export default async function CheckoutSuccessPage({
   const state = buyer
     ? await checkoutState(sessionId, buyer.email)
     : { ticket: null, delivered: false, processing: false };
+  const event = state.ticket ? getEventById(state.ticket.eventId) : undefined;
+  const testSimulation = Boolean(event && isTestSimulationEvent(event));
   const isOwner =
     Boolean(state.ticket && buyer) &&
     state.ticket!.buyerEmail.trim().toLowerCase() ===
@@ -176,6 +179,23 @@ export default async function CheckoutSuccessPage({
           <div className="p-6 sm:p-10">
             {state.ticket && isOwner ? (
               <>
+                {testSimulation && (
+                  <div className="mb-5 rounded-2xl border border-amber-300 bg-amber-50 p-4 text-sm font-bold leading-6 text-amber-950">
+                    {english
+                      ? "This PDF records your Stripe test payment. It is not valid for venue entry; use the attributed event source for official admission."
+                      : "Този PDF удостоверява тестовото Stripe плащане. Не важи за вход; използвай посочения източник на събитието за официален достъп."}
+                    {event?.sourceUrl && (
+                      <a
+                        href={event.sourceUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="ml-1 underline underline-offset-2"
+                      >
+                        {event.sourceName}
+                      </a>
+                    )}
+                  </div>
+                )}
                 <div className="rounded-2xl border border-slate-200 bg-slate-50 p-5">
                   <div className="flex items-start gap-4">
                     <span className="inline-flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-blue-100 text-[#2457ff]">

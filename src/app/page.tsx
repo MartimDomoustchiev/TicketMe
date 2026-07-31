@@ -20,7 +20,6 @@ import {
   eventHref,
   eventTimestamp,
   formatEventDate,
-  formatPrice,
   localizedEventTagline,
   localizeCity,
 } from "@/components/marketplace/catalog-ui";
@@ -28,7 +27,8 @@ import {
   EVENT_CATEGORIES,
   formatDualCurrencyPrice,
   getCategoryImage,
-  isEventOpenForInternalSale,
+  isEventOpenForTicketMeCheckout,
+  isTestSimulationEvent,
   type EventCategory,
 } from "@/lib/event";
 import { listCatalogEvents } from "@/lib/catalog";
@@ -46,19 +46,26 @@ export default async function Home() {
   const copy = HOME_COPY[locale];
   const popularEvents = catalogEvents.toSorted(
     (left, right) =>
-      Number(isEventOpenForInternalSale(right)) -
-        Number(isEventOpenForInternalSale(left)) ||
+      Number(isEventOpenForTicketMeCheckout(right)) -
+        Number(isEventOpenForTicketMeCheckout(left)) ||
       Number(Boolean(right.featured)) - Number(Boolean(left.featured)) ||
       (right.bangerScore ?? 0) - (left.bangerScore ?? 0) ||
       eventTimestamp(left) - eventTimestamp(right),
   );
   const featuredEvents = popularEvents.slice(0, 8);
   const heroEvent = featuredEvents[0];
-  const internalSale = heroEvent
-    ? isEventOpenForInternalSale(heroEvent)
+  const checkoutEnabled = heroEvent
+    ? isEventOpenForTicketMeCheckout(heroEvent)
     : false;
+  const testSimulation = heroEvent
+    ? isTestSimulationEvent(heroEvent)
+    : false;
+  const heroCheckoutPrice = heroEvent?.ticketTypes.reduce(
+    (lowest, ticketType) => Math.min(lowest, ticketType.price),
+    Number.POSITIVE_INFINITY,
+  );
   const availability =
-    internalSale && heroEvent
+    checkoutEnabled && heroEvent
       ? await getPublicAvailability(heroEvent.id)
       : null;
   const heroVisual = heroEvent ? getEventVisual(heroEvent) : null;
@@ -147,7 +154,7 @@ export default async function Home() {
             </div>
 
             <div className="mt-8 flex flex-wrap items-center gap-3">
-              {internalSale ? (
+              {checkoutEnabled ? (
                 <Link
                   href={
                     availability
@@ -157,7 +164,9 @@ export default async function Home() {
                   className="inline-flex h-13 items-center justify-center gap-2 rounded-xl bg-[#2457ff] px-6 font-black text-white shadow-[0_14px_35px_rgba(36,87,255,0.35)] transition hover:-translate-y-0.5 hover:bg-blue-700 focus-visible:ring-4 focus-visible:ring-blue-300"
                 >
                   {availability
-                    ? copy.chooseTickets
+                    ? testSimulation
+                      ? copy.testPayment
+                      : copy.chooseTickets
                     : copy.moreInformation}
                   <ArrowRight size={19} aria-hidden="true" />
                 </Link>
@@ -174,7 +183,7 @@ export default async function Home() {
                   <ExternalLink size={18} aria-hidden="true" />
                 </a>
               )}
-              {(availability || !internalSale) && (
+              {(availability || !checkoutEnabled) && (
                 <Link
                   href={eventHref(heroEvent, locale)}
                   className="inline-flex h-13 items-center justify-center rounded-xl border border-white/25 bg-white/5 px-6 font-black text-white transition hover:bg-white/12"
@@ -189,15 +198,20 @@ export default async function Home() {
             <div className="flex items-start justify-between gap-4">
               <div>
                 <p className="text-xs font-black uppercase tracking-wider text-slate-500">
-                  {internalSale
-                    ? copy.ticketsFrom
+                  {checkoutEnabled
+                    ? testSimulation
+                      ? copy.testOffersFrom
+                      : copy.ticketsFrom
                     : heroEvent.sourceOfficial
                       ? copy.officialListing
                       : copy.sourceListing}
                 </p>
                 <p className="mt-1 text-3xl font-black tracking-[-0.04em]">
-                  {internalSale
-                    ? formatPrice(heroEvent, locale)
+                  {checkoutEnabled && Number.isFinite(heroCheckoutPrice)
+                    ? formatDualCurrencyPrice(
+                        heroCheckoutPrice as number,
+                        locale,
+                      )
                     : heroEvent.sourceName}
                 </p>
               </div>
@@ -207,8 +221,19 @@ export default async function Home() {
             </div>
 
             <div className="my-5 h-px bg-slate-200" />
-            {internalSale ? (
+            {checkoutEnabled ? (
               <>
+                {testSimulation && (
+                  <div className="mb-4 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-amber-950">
+                    <p className="flex items-center gap-2 text-sm font-black">
+                      <CircleAlert size={17} aria-hidden="true" />
+                      {copy.testPayment}
+                    </p>
+                    <p className="mt-1 text-xs leading-5 text-amber-800">
+                      {copy.testPaymentText}
+                    </p>
+                  </div>
+                )}
                 <div className="grid gap-3">
                   {heroEvent.ticketTypes.map((type) => (
                     <div
@@ -264,6 +289,17 @@ export default async function Home() {
                       : copy.availabilityUnavailableText}
                   </p>
                 </div>
+                {heroEvent.saleMode === "external" && (
+                  <a
+                    href={heroEvent.sourceUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="mt-4 inline-flex h-11 w-full items-center justify-center gap-2 rounded-xl border border-blue-200 px-4 text-sm font-black text-[#2457ff] transition hover:bg-blue-50"
+                  >
+                    {copy.eventSource}: {heroEvent.sourceName}
+                    <ExternalLink size={15} aria-hidden="true" />
+                  </a>
+                )}
               </>
             ) : (
               <>
@@ -548,8 +584,13 @@ const HOME_COPY = {
   bg: {
     weeklyHighlight: "Акцент на седмицата",
     chooseTickets: "Купи билет",
+    testPayment: "Тестово Stripe плащане",
+    testPaymentText:
+      "Без реално таксуване. Цените и бройките са TicketMe симулация, а PDF билетът не важи за вход.",
     moreInformation: "Повече информация",
     ticketsFrom: "Билети от",
+    testOffersFrom: "TicketMe тестови оферти от",
+    eventSource: "Източник",
     officialListing: "Официален източник",
     sourceListing: "Източник на събитието",
     sourceVerified: "Данните са свързани с официалния източник",
@@ -582,19 +623,19 @@ const HOME_COPY = {
     confidenceEyebrow: "Прозрачност по дизайн",
     confidenceTitle: "Знаеш откъде идва всяка обява",
     confidenceText:
-      "TicketMe различава ясно външните listings от събитията, продавани директно в платформата.",
+      "TicketMe показва отделно източника на събитието, организаторските билети и ясно означените Stripe test симулации.",
     secureRequest: "Ясно посочен източник",
     secureRequestText:
       "Всяка външна обява води до атрибутирания източник на събитието.",
-    fairQueue: "Без измислена наличност",
+    fairQueue: "Ясно означена тестова наличност",
     fairQueueText:
-      "Цена и свободни места се показват само когато идват от проверим source.",
+      "Симулационните цени и бройки никога не се представят като официална наличност на организатора.",
     emailDelivery: "Само бъдещи дати",
     emailDeliveryText:
       "Изтеклите събития автоматично отпадат от каталога и директните страници.",
     liveInventory: "Защитена директна продажба",
     liveInventoryText:
-      "Checkout, опашка и PDF билет се активират само за одобрен organizer inventory.",
+      "Реалният admission билет и тестовият PDF са ясно разграничени; тестовият не важи за вход.",
     eventsStat: "предстоящи събития",
     citiesStat: "града в календара",
     accessStat: "достъп до твоите билети",
@@ -602,8 +643,13 @@ const HOME_COPY = {
   en: {
     weeklyHighlight: "Highlight of the week",
     chooseTickets: "Buy ticket",
+    testPayment: "Test Stripe payment",
+    testPaymentText:
+      "No real charge. Prices and counts are a TicketMe simulation, and the PDF ticket is not valid for venue entry.",
     moreInformation: "More information",
     ticketsFrom: "Tickets from",
+    testOffersFrom: "TicketMe test offers from",
+    eventSource: "Source",
     officialListing: "Official source",
     sourceListing: "Event source",
     sourceVerified: "Details are linked to the official source",
@@ -637,19 +683,19 @@ const HOME_COPY = {
     confidenceEyebrow: "Transparency by design",
     confidenceTitle: "Know where every listing comes from",
     confidenceText:
-      "TicketMe clearly separates external discovery listings from events sold directly on the platform.",
+      "TicketMe separately identifies the event source, organizer admission tickets and clearly labelled Stripe test simulations.",
     secureRequest: "Clearly attributed sources",
     secureRequestText:
       "Every external listing links to its attributed event source.",
-    fairQueue: "No invented availability",
+    fairQueue: "Clearly labelled test inventory",
     fairQueueText:
-      "Prices and remaining tickets appear only when backed by a verifiable source.",
+      "Simulation prices and counts are never presented as the organizer's official availability.",
     emailDelivery: "Future dates only",
     emailDeliveryText:
       "Expired events automatically leave the catalogue and direct pages.",
     liveInventory: "Protected direct sales",
     liveInventoryText:
-      "Checkout, fair allocation and PDF tickets activate only for approved organizer inventory.",
+      "Admission tickets and test PDFs are clearly separated; test tickets are not valid for entry.",
     eventsStat: "upcoming events",
     citiesStat: "cities in the calendar",
     accessStat: "access to your tickets",

@@ -1,7 +1,12 @@
-import { ArrowUpRight, MapPin } from "lucide-react";
+import { ArrowUpRight, ExternalLink, MapPin } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
-import type { CatalogEvent } from "@/lib/event";
+import {
+  formatDualCurrencyPrice,
+  isEventOpenForTicketMeCheckout,
+  isTestSimulationEvent,
+  type CatalogEvent,
+} from "@/lib/event";
 import {
   categoryLabel,
   eventHref,
@@ -28,13 +33,23 @@ export function EventCard({
 }: EventCardProps) {
   const dictionary = getDictionary(locale);
   const visual = getEventVisual(event);
+  const checkoutEnabled = isEventOpenForTicketMeCheckout(event);
+  const testSimulation = isTestSimulationEvent(event);
+  const checkoutPrice = event.ticketTypes.reduce(
+    (lowest, ticketType) => Math.min(lowest, ticketType.price),
+    Number.POSITIVE_INFINITY,
+  );
+  const testOfferLabel =
+    locale === "en" ? "TicketMe test offer" : "TicketMe тестова оферта";
+  const sourceLinkLabel =
+    locale === "en" ? "Event source" : "Източник на събитието";
 
   return (
-    <Link
-      href={eventHref(event, locale)}
-      className="group block h-full rounded-2xl outline-none focus-visible:ring-4 focus-visible:ring-blue-200"
-    >
-      <article className="flex h-full flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-[0_8px_30px_rgba(15,23,42,0.06)] transition duration-300 group-hover:-translate-y-1 group-hover:border-blue-200 group-hover:shadow-[0_18px_45px_rgba(15,23,42,0.13)]">
+    <article className="group flex h-full flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-[0_8px_30px_rgba(15,23,42,0.06)] transition duration-300 hover:-translate-y-1 hover:border-blue-200 hover:shadow-[0_18px_45px_rgba(15,23,42,0.13)]">
+      <Link
+        href={eventHref(event, locale)}
+        className="flex flex-1 flex-col outline-none focus-visible:ring-4 focus-visible:ring-inset focus-visible:ring-blue-200"
+      >
         <div className="relative aspect-[16/10] overflow-hidden bg-slate-200">
           <Image
             src={event.image}
@@ -89,15 +104,21 @@ export function EventCard({
             <div className="mt-auto flex items-end justify-between gap-3 pt-5">
               <div>
                 <p className="text-xs font-bold uppercase tracking-wide text-slate-500">
-                  {event.saleMode === "external"
+                  {testSimulation
+                    ? testOfferLabel
+                    : event.saleMode === "external"
                     ? externalSourceLabel(event, locale)
                     : dictionary.card.ticketsFrom}
                 </p>
                 <p className="mt-0.5 text-base font-black text-[#10172a]">
-                  {event.saleMode === "external" &&
-                  event.priceAvailable !== true
-                    ? event.sourceName
-                    : formatPrice(event, locale)}
+                  {testSimulation &&
+                  checkoutEnabled &&
+                  Number.isFinite(checkoutPrice)
+                    ? formatDualCurrencyPrice(checkoutPrice, locale)
+                    : event.saleMode === "external" &&
+                        event.priceAvailable !== true
+                      ? event.sourceName
+                      : formatPrice(event, locale)}
                 </p>
               </div>
               <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-slate-100 text-slate-600 transition group-hover:bg-[#2457ff] group-hover:text-white">
@@ -106,7 +127,20 @@ export function EventCard({
             </div>
           </div>
         </div>
-      </article>
-    </Link>
+      </Link>
+      {event.saleMode === "external" && (
+        <a
+          href={event.sourceUrl}
+          target="_blank"
+          rel="noreferrer"
+          className="relative z-10 flex items-center justify-between gap-3 border-t border-slate-100 bg-slate-50 px-4 py-3 text-xs font-black text-slate-600 transition hover:bg-blue-50 hover:text-[#2457ff] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-inset focus-visible:ring-blue-200"
+        >
+          <span className="truncate">
+            {sourceLinkLabel}: {event.sourceName}
+          </span>
+          <ExternalLink size={14} className="shrink-0" aria-hidden="true" />
+        </a>
+      )}
+    </article>
   );
 }

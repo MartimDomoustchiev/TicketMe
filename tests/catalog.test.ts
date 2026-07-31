@@ -10,6 +10,7 @@ import {
   getCategoryImage,
   isDualPriceDisplayPeriod,
   isEventOpenForInternalSale,
+  isEventOpenForTicketMeCheckout,
   isEventUpcoming,
   isTicketTypeId,
   type CatalogEvent,
@@ -39,6 +40,7 @@ function internalEvent(startsAt: string): CatalogEvent {
     id: "organizer-owned-event",
     slug: "organizer-owned-event",
     startsAt,
+    checkoutMode: "admission",
     saleMode: "internal",
     sourceOfficial: true,
     ticketTypes: [INTERNAL_TICKET],
@@ -46,10 +48,11 @@ function internalEvent(startsAt: string): CatalogEvent {
   };
 }
 
-test("static third-party catalogue is source-only and has no fabricated inventory", () => {
+test("static external listings keep source facts and expose explicit test inventory", () => {
   const externalEvents = CATALOG_EVENTS.filter(
     (event) => event.saleMode === "external",
   );
+  const beforeEveryStaticEvent = new Date("2026-07-20T12:00:00+03:00");
 
   assert.ok(CATALOG_EVENTS.length >= 100);
   assert.ok(externalEvents.length >= 100);
@@ -81,7 +84,29 @@ test("static third-party catalogue is source-only and has no fabricated inventor
     assert.ok(EVENT_CATEGORIES.includes(event.category));
     assert.equal(event.heroImage, event.image);
     assert.equal(event.saleMode, "external");
-    assert.equal(event.ticketTypes.length, 0);
+    assert.equal(event.checkoutMode, "test-simulation");
+    assert.equal(event.ticketTypes.length, 3);
+    assert.deepEqual(
+      event.ticketTypes.map((ticketType) => ticketType.id),
+      ["fan", "standard", "premium"],
+    );
+    for (const ticketType of event.ticketTypes) {
+      assert.ok(Number.isInteger(ticketType.capacity));
+      assert.ok(ticketType.capacity > 0);
+      assert.ok(ticketType.price > 0);
+      assert.equal(ticketType.currency, "EUR");
+      assert.match(ticketType.description, /not valid for venue admission/i);
+    }
+    assert.ok(
+      event.ticketTypes.reduce(
+        (total, ticketType) => total + ticketType.capacity,
+        0,
+      ) > 0,
+    );
+    assert.equal(
+      isEventOpenForTicketMeCheckout(event, beforeEveryStaticEvent),
+      true,
+    );
     assert.match(event.sourceUrl, /^https:\/\//);
 
     if (event.id === EVENT.id) {
@@ -101,6 +126,7 @@ test("first-party event exposes explicit organizer inventory for Checkout", () =
   const now = new Date("2026-07-30T12:00:00+03:00");
 
   assert.equal(PRIMARY_SALE_EVENT.saleMode, "internal");
+  assert.equal(PRIMARY_SALE_EVENT.checkoutMode, "admission");
   assert.equal(PRIMARY_SALE_EVENT.sourceName, "TicketMe");
   assert.equal(PRIMARY_SALE_EVENT.sourceOfficial, true);
   assert.equal(PRIMARY_SALE_EVENT.priceAvailable, true);
@@ -118,6 +144,10 @@ test("first-party event exposes explicit organizer inventory for Checkout", () =
     1_150,
   );
   assert.equal(isEventOpenForInternalSale(PRIMARY_SALE_EVENT, now), true);
+  assert.equal(
+    isEventOpenForTicketMeCheckout(PRIMARY_SALE_EVENT, now),
+    true,
+  );
 });
 
 test("ticket type and sale eligibility checks fail closed", () => {
@@ -127,8 +157,27 @@ test("ticket type and sale eligibility checks fail closed", () => {
   assert.equal(isTicketTypeId("standard"), true);
   assert.equal(isTicketTypeId("unknown"), false);
   assert.equal(isEventOpenForInternalSale(future, now), true);
+  assert.equal(isEventOpenForTicketMeCheckout(future, now), true);
   assert.equal(
     isEventOpenForInternalSale({ ...future, saleMode: "external" }, now),
+    false,
+  );
+  assert.equal(
+    isEventOpenForTicketMeCheckout(
+      {
+        ...future,
+        checkoutMode: "test-simulation",
+        saleMode: "external",
+      },
+      now,
+    ),
+    true,
+  );
+  assert.equal(
+    isEventOpenForTicketMeCheckout(
+      { ...future, checkoutMode: undefined },
+      now,
+    ),
     false,
   );
   assert.equal(
@@ -136,7 +185,18 @@ test("ticket type and sale eligibility checks fail closed", () => {
     false,
   );
   assert.equal(
+    isEventOpenForTicketMeCheckout({ ...future, ticketTypes: [] }, now),
+    false,
+  );
+  assert.equal(
     isEventOpenForInternalSale(
+      { ...future, startsAt: "2026-07-29T11:59:59+03:00" },
+      now,
+    ),
+    false,
+  );
+  assert.equal(
+    isEventOpenForTicketMeCheckout(
       { ...future, startsAt: "2026-07-29T11:59:59+03:00" },
       now,
     ),

@@ -88,7 +88,10 @@ export async function findCatalogEventById(
   try {
     const discovered = await getPublishedCatalogEventById(id);
     if (discovered) {
-      const mapped = mapDiscoveredEvent(discovered);
+      const mapped = preserveStaticCheckout(
+        mapDiscoveredEvent(discovered),
+        staticEvent,
+      );
       return isEventUpcoming(mapped) ? mapped : fallback;
     }
     return fallback;
@@ -111,7 +114,10 @@ export async function findCatalogEventBySlug(
   try {
     const discovered = await getPublishedCatalogEventBySlug(slug);
     if (discovered) {
-      const mapped = mapDiscoveredEvent(discovered);
+      const mapped = preserveStaticCheckout(
+        mapDiscoveredEvent(discovered),
+        staticEvent,
+      );
       return isEventUpcoming(mapped) ? mapped : fallback;
     }
     return fallback;
@@ -187,7 +193,7 @@ function mapDiscoveredEvent(record: CatalogEventRecord): CatalogEvent {
     ticketTypes: [],
     sourceName,
     sourceUrl: record.primarySource.sourceUrl,
-    saleMode: "external",
+    saleMode: record.saleMode,
     sourceOfficial: record.primarySource.isOfficial,
     aiEnhanced: record.lastDiscoveredRunId !== null,
     featured: record.featured,
@@ -216,7 +222,7 @@ function mergeCatalogues(
       discoveredBySource.get(event.sourceUrl);
     if (replacement) {
       consumed.add(replacement.id);
-      return replacement;
+      return preserveStaticCheckout(replacement, event);
     }
     return event;
   });
@@ -225,6 +231,30 @@ function mergeCatalogues(
     ...refreshedStatic,
     ...discoveredEvents.filter((event) => !consumed.has(event.id)),
   ];
+}
+
+/**
+ * A discovery may refresh the descriptive/source facts for a seeded event,
+ * but the checkout backend resolves seeded IDs synchronously. Preserve that
+ * stable identity and its server-owned offer so a refreshed listing cannot
+ * expose a checkout that the inventory service cannot fulfill.
+ */
+function preserveStaticCheckout(
+  event: CatalogEvent,
+  staticEvent: CatalogEvent | undefined,
+): CatalogEvent {
+  if (!staticEvent?.checkoutMode || staticEvent.ticketTypes.length === 0) {
+    return event;
+  }
+
+  return {
+    ...event,
+    id: staticEvent.id,
+    slug: staticEvent.slug,
+    checkoutMode: staticEvent.checkoutMode,
+    saleMode: staticEvent.saleMode,
+    ticketTypes: staticEvent.ticketTypes,
+  };
 }
 
 function reportCatalogFallback(error: unknown): void {

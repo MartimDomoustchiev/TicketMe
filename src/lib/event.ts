@@ -15,6 +15,7 @@ export type EventCategory = (typeof EVENT_CATEGORIES)[number];
 export type TicketTypeId = "fan" | "standard" | "premium";
 export type CurrencyCode = "EUR";
 export type EventSaleMode = "internal" | "external";
+export type EventCheckoutMode = "admission" | "test-simulation";
 
 export type TicketType = {
   id: TicketTypeId;
@@ -52,8 +53,14 @@ export type CatalogEvent = {
   sourceName: string;
   sourceUrl: string;
   /**
-   * Internal events are sold by the platform. External events are discovery
-   * listings and always send the visitor to their attributed source.
+   * Admission offers represent organizer-owned inventory. Test simulations
+   * exercise the complete Stripe/PDF/email flow but never grant venue entry.
+   */
+  checkoutMode?: EventCheckoutMode;
+  /**
+   * Internal events have platform-owned admission inventory. External events
+   * remain attributed discovery listings even when they expose a separate,
+   * non-admission test checkout simulation.
    */
   saleMode?: EventSaleMode;
   /**
@@ -81,6 +88,19 @@ export const CATEGORY_LABELS: Readonly<Record<EventCategory, string>> = {
 const SOFIA_TIME_ZONE = "Europe/Sofia";
 const EUR_CURRENCY: CurrencyCode = "EUR";
 export const BGN_PER_EUR = 1.95583;
+
+const PRICE_POINTS = [25, 29, 35, 39, 45, 49, 55, 59, 65, 69, 75, 79] as const;
+
+const CATEGORY_PRICE_FACTOR: Readonly<Record<EventCategory, number>> = {
+  Concerts: 1,
+  Festivals: 1.2,
+  Theatre: 0.9,
+  Sports: 0.8,
+  Culture: 0.75,
+  Nightlife: 0.85,
+  Business: 2.4,
+  Family: 0.65,
+};
 
 const DUAL_PRICE_DISPLAY_START = Date.parse(
   "2025-08-08T00:00:00+03:00",
@@ -218,6 +238,10 @@ export function formatPrice(
         minimumFractionDigits: 0,
         maximumFractionDigits: 2,
       }).format(amount);
+}
+
+export function convertLegacyBgnToEur(amountInBgn: number): number {
+  return Math.round((amountInBgn / BGN_PER_EUR) * 100) / 100;
 }
 
 export function isDualPriceDisplayPeriod(now = new Date()): boolean {
@@ -404,6 +428,64 @@ export function getCategoryImage(category: EventCategory): string {
   return CATEGORY_IMAGES[category];
 }
 
+function getLegacyBgnPriceFrom(
+  seed: EventSeed,
+  category: EventCategory,
+): number {
+  const base = PRICE_POINTS[seed.sourceId % PRICE_POINTS.length];
+  return Math.round(base * CATEGORY_PRICE_FACTOR[category]);
+}
+
+function buildTicketTypes(
+  seedValue: number,
+  legacyPriceFrom: number,
+): readonly TicketType[] {
+  const legacyStandardPrice = Math.max(
+    legacyPriceFrom + 10,
+    Math.round(legacyPriceFrom * 1.3),
+  );
+  const legacyPremiumPrice = Math.max(
+    legacyStandardPrice + 20,
+    Math.round(legacyPriceFrom * 1.9),
+  );
+  const priceFrom = convertLegacyBgnToEur(legacyPriceFrom);
+  const standardPrice = convertLegacyBgnToEur(legacyStandardPrice);
+  const premiumPrice = convertLegacyBgnToEur(legacyPremiumPrice);
+
+  return [
+    {
+      id: "fan",
+      label: "Test fan",
+      price: priceFrom,
+      priceLabel: formatPrice(priceFrom),
+      currency: EUR_CURRENCY,
+      capacity: 80 + (seedValue % 160),
+      accent: "#14b8a6",
+      description: "Stripe test offer; not valid for venue admission.",
+    },
+    {
+      id: "standard",
+      label: "Test standard",
+      price: standardPrice,
+      priceLabel: formatPrice(standardPrice),
+      currency: EUR_CURRENCY,
+      capacity: 160 + ((seedValue * 7) % 340),
+      accent: "#f97316",
+      description: "Stripe test offer; not valid for venue admission.",
+    },
+    {
+      id: "premium",
+      label: "Test premium",
+      price: premiumPrice,
+      priceLabel: formatPrice(premiumPrice),
+      currency: EUR_CURRENCY,
+      capacity: 30 + (seedValue % 70),
+      accent: "#7c3aed",
+      description: "Stripe test offer; not valid for venue admission.",
+    },
+  ];
+}
+
 function normalizeSeed(seed: EventSeed): CatalogEvent {
   const category = inferCategory(seed);
   const city = normalizeCity(seed.city);
@@ -412,6 +494,7 @@ function normalizeSeed(seed: EventSeed): CatalogEvent {
       ? "Локацията предстои"
       : seed.venue.trim();
   const startsAt = normalizeStartsAt(seed.startsAt);
+  const legacyPriceFrom = getLegacyBgnPriceFrom(seed, category);
   const image = `/events/listings/bilet-${seed.sourceId}.webp`;
 
   return {
@@ -434,9 +517,10 @@ function normalizeSeed(seed: EventSeed): CatalogEvent {
     currency: EUR_CURRENCY,
     image,
     heroImage: image,
-    ticketTypes: [],
+    ticketTypes: buildTicketTypes(seed.sourceId, legacyPriceFrom),
     sourceName: "Bilet.bg",
     sourceUrl: `https://www.bilet.bg/bg/events/${seed.slug}`,
+    checkoutMode: "test-simulation",
     saleMode: "external",
     sourceOfficial: false,
     featured: FEATURED_SOURCE_IDS.has(seed.sourceId),
@@ -452,13 +536,45 @@ const FEATURED_IMAGE = "/events/deep-purple.webp";
 const TICKETME_LIVE_STARTS_AT = "2027-02-27T19:30:00+02:00";
 const TICKETME_LIVE_IMAGE = "/events/ticketme-live-2027.svg";
 
+const FEATURED_TICKET_TYPES: readonly TicketType[] = [
+  {
+    id: "fan",
+    label: "Test fan zone",
+    price: convertLegacyBgnToEur(91),
+    priceLabel: formatPrice(convertLegacyBgnToEur(91)),
+    currency: EUR_CURRENCY,
+    capacity: 160,
+    accent: "#14b8a6",
+    description: "Stripe test offer; not valid for venue admission.",
+  },
+  {
+    id: "standard",
+    label: "Test standard seat",
+    price: convertLegacyBgnToEur(128),
+    priceLabel: formatPrice(convertLegacyBgnToEur(128)),
+    currency: EUR_CURRENCY,
+    capacity: 90,
+    accent: "#f97316",
+    description: "Stripe test offer; not valid for venue admission.",
+  },
+  {
+    id: "premium",
+    label: "Test premium",
+    price: convertLegacyBgnToEur(189),
+    priceLabel: formatPrice(convertLegacyBgnToEur(189)),
+    currency: EUR_CURRENCY,
+    capacity: 30,
+    accent: "#7c3aed",
+    description: "Stripe test offer; not valid for venue admission.",
+  },
+];
+
 /**
  * First-party inventory used by the complete TicketMe checkout flow.
  *
- * Third-party discoveries below remain source-only: having an event in the
- * catalogue never grants TicketMe permission to sell it. Keeping first-party
- * commerce explicit also gives the inventory service a trustworthy capacity
- * source instead of inventing availability for scraped listings.
+ * This organizer-owned event issues admission tickets. Attributed third-party
+ * listings keep their external sale mode and source facts, while exposing a
+ * clearly labelled Stripe test simulation that is not valid for venue entry.
  */
 export const PRIMARY_SALE_EVENT: CatalogEvent = {
   id: "ticketme-live-next-wave-2027",
@@ -516,6 +632,7 @@ export const PRIMARY_SALE_EVENT: CatalogEvent = {
   sourceName: "TicketMe",
   sourceUrl:
     "https://www.ticketme.store/events/ticketme-live-next-wave-2027",
+  checkoutMode: "admission",
   saleMode: "internal",
   sourceOfficial: true,
   featured: true,
@@ -543,9 +660,10 @@ export const EVENT: CatalogEvent = {
   currency: EUR_CURRENCY,
   image: FEATURED_IMAGE,
   heroImage: FEATURED_IMAGE,
-  ticketTypes: [],
+  ticketTypes: FEATURED_TICKET_TYPES,
   sourceName: "Eventim",
   sourceUrl: "https://www.eventim.bg/en/artist/deep-purple/",
+  checkoutMode: "test-simulation",
   saleMode: "external",
   sourceOfficial: true,
   featured: true,
@@ -592,6 +710,24 @@ export function isEventOpenForInternalSale(
     isEventUpcoming(event, now) &&
     event.ticketTypes.length > 0
   );
+}
+
+export function isEventOpenForTicketMeCheckout(
+  event: CatalogEvent,
+  now = new Date(),
+): boolean {
+  return (
+    (event.checkoutMode === "admission" ||
+      event.checkoutMode === "test-simulation") &&
+    isEventUpcoming(event, now) &&
+    event.ticketTypes.length > 0
+  );
+}
+
+export function isTestSimulationEvent(
+  event: Pick<CatalogEvent, "checkoutMode">,
+): boolean {
+  return event.checkoutMode === "test-simulation";
 }
 
 export function getTicketType(id: TicketTypeId): TicketType;

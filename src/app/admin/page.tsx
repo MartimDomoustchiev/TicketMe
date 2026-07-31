@@ -7,6 +7,7 @@ import {
   Search,
   Sparkles,
   Ticket,
+  TriangleAlert,
   WalletCards,
 } from "lucide-react";
 import Link from "next/link";
@@ -98,7 +99,9 @@ export default async function AdminPage({
     0,
   );
   const checkedIn = tickets.filter(
-    (ticket) => ticket.status === "checked_in",
+    (ticket) =>
+      ticket.status === "checked_in" &&
+      getEventById(ticket.eventId)?.checkoutMode !== "test-simulation",
   ).length;
   const gross = eventSummaries.reduce(
     (sum, summary) => sum + summary.gross,
@@ -331,7 +334,7 @@ export default async function AdminPage({
                     className="h-11 w-full rounded-xl border border-slate-300 bg-white px-3 text-sm font-semibold outline-none transition focus:border-[#2457ff] focus:ring-4 focus:ring-blue-100"
                   >
                     <option value="all">Всички статуси</option>
-                    <option value="issued">Валиден</option>
+                    <option value="issued">Издаден / тестов запис</option>
                     <option value="checked_in">Използван</option>
                   </select>
                 </label>
@@ -459,6 +462,7 @@ function TicketRow({
 }) {
   const type = getTicketType(ticket.eventId, ticket.ticketType);
   const event = getEventById(ticket.eventId);
+  const simulation = event?.checkoutMode === "test-simulation";
 
   return (
     <tr className="transition hover:bg-slate-50">
@@ -498,17 +502,25 @@ function TicketRow({
       <td className="px-5 py-4">
         <span
           className={`inline-flex items-center gap-2 rounded-full px-2.5 py-1 text-xs font-black ${
-            ticket.status === "checked_in"
+            simulation
+              ? "bg-amber-50 text-amber-900"
+              : ticket.status === "checked_in"
               ? "bg-slate-100 text-slate-700"
               : "bg-emerald-50 text-emerald-800"
           }`}
         >
-          {ticket.status === "checked_in" ? (
+          {simulation ? (
+            <TriangleAlert size={14} aria-hidden="true" />
+          ) : ticket.status === "checked_in" ? (
             <CheckCircle2 size={14} aria-hidden="true" />
           ) : (
             <Circle size={14} aria-hidden="true" />
           )}
-          {ticket.status === "checked_in" ? "Използван" : "Валиден"}
+          {simulation
+            ? "Тестов - не важи за вход"
+            : ticket.status === "checked_in"
+              ? "Използван"
+              : "Валиден"}
         </span>
       </td>
     </tr>

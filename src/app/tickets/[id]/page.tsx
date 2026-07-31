@@ -3,11 +3,13 @@ import {
   CalendarDays,
   CheckCircle2,
   Download,
+  ExternalLink,
   MapPin,
   Printer,
   QrCode,
   ShieldCheck,
   Ticket as TicketIcon,
+  TriangleAlert,
   UserRound,
 } from "lucide-react";
 import Link from "next/link";
@@ -59,6 +61,8 @@ export default async function TicketPage({
 
   const type = getTicketType(ticket.eventId, ticket.ticketType);
   const event = getEventById(ticket.eventId);
+  const simulation = event?.checkoutMode === "test-simulation";
+  const sourceUrl = safeSourceUrl(event?.sourceUrl);
   const accountHref = localizeHref(
     locale,
     admin ? "/admin" : "/account/tickets",
@@ -72,7 +76,9 @@ export default async function TicketPage({
     },
   );
   const typeLabel =
-    locale === "en"
+    simulation
+      ? type.label
+      : locale === "en"
       ? {
           fan: "Fan zone",
           standard: "Standard",
@@ -101,17 +107,23 @@ export default async function TicketPage({
                 <div>
                   <p
                     className={`inline-flex items-center gap-2 rounded-full px-3 py-1 text-sm font-black ring-1 ${
-                      ticket.status === "checked_in"
+                      simulation
+                        ? "bg-amber-300/15 text-amber-100 ring-amber-200/25"
+                        : ticket.status === "checked_in"
                         ? "bg-white/10 text-slate-200 ring-white/15"
                         : "bg-emerald-400/10 text-emerald-100 ring-emerald-300/20"
                     }`}
                   >
-                    {ticket.status === "checked_in" ? (
+                    {simulation ? (
+                      <TriangleAlert size={16} aria-hidden="true" />
+                    ) : ticket.status === "checked_in" ? (
                       <CheckCircle2 size={16} aria-hidden="true" />
                     ) : (
                       <ShieldCheck size={16} aria-hidden="true" />
                     )}
-                    {ticket.status === "checked_in"
+                    {simulation
+                      ? copy.testTicket
+                      : ticket.status === "checked_in"
                       ? copy.usedTicket
                       : copy.validTicket}
                   </p>
@@ -130,7 +142,27 @@ export default async function TicketPage({
 
             <div className="grid lg:grid-cols-[1fr_320px]">
               <div className="p-5 sm:p-8">
-                <h2 className="text-xl font-black">{copy.ticketDetails}</h2>
+                {simulation && (
+                  <div
+                    role="note"
+                    className="mb-6 flex gap-3 rounded-2xl border border-amber-300 bg-amber-50 p-4 text-amber-950"
+                  >
+                    <TriangleAlert
+                      className="mt-0.5 shrink-0"
+                      size={21}
+                      aria-hidden="true"
+                    />
+                    <div>
+                      <p className="font-black">{copy.testNoticeTitle}</p>
+                      <p className="mt-1 text-sm leading-6">
+                        {copy.testNoticeText}
+                      </p>
+                    </div>
+                  </div>
+                )}
+                <h2 className="text-xl font-black">
+                  {simulation ? copy.testDetails : copy.ticketDetails}
+                </h2>
                 <dl className="mt-5 grid gap-4 sm:grid-cols-2">
                   <TicketDetail
                     icon={<UserRound size={18} aria-hidden="true" />}
@@ -140,7 +172,11 @@ export default async function TicketPage({
                   />
                   <TicketDetail
                     icon={<TicketIcon size={18} aria-hidden="true" />}
-                    label={copy.categoryAndSeat}
+                    label={
+                      simulation
+                        ? copy.testTypeAndReference
+                        : copy.categoryAndSeat
+                    }
                     value={typeLabel}
                     secondary={ticket.seatLabel}
                   />
@@ -213,16 +249,34 @@ export default async function TicketPage({
                 <span className="inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-blue-100 text-[#2457ff]">
                   <QrCode size={24} aria-hidden="true" />
                 </span>
-                <h2 className="mt-5 text-xl font-black">{copy.qrAccess}</h2>
+                <h2 className="mt-5 text-xl font-black">
+                  {simulation ? copy.qrVerification : copy.qrAccess}
+                </h2>
                 <p className="mt-2 text-sm leading-6 text-slate-600">
-                  {copy.qrText}
+                  {simulation ? copy.qrVerificationText : copy.qrText}
                 </p>
                 <div className="mt-5 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm leading-6 text-amber-950">
-                  <p className="font-black">{copy.keepSafe}</p>
-                  <p className="mt-1">{copy.keepSafeText}</p>
+                  <p className="font-black">
+                    {simulation ? copy.testReminder : copy.keepSafe}
+                  </p>
+                  <p className="mt-1">
+                    {simulation ? copy.testReminderText : copy.keepSafeText}
+                  </p>
                 </div>
 
-                {event && (
+                {simulation && sourceUrl && (
+                  <a
+                    href={sourceUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="mt-5 inline-flex items-center gap-1.5 text-sm font-black text-[#2457ff] hover:text-blue-800"
+                  >
+                    {copy.openSource(event?.sourceName ?? "")}
+                    <ExternalLink size={15} aria-hidden="true" />
+                  </a>
+                )}
+
+                {event && !simulation && (
                   <Link
                     href={localizeHref(locale, `/events/${event.slug}`)}
                     className="mt-5 inline-flex text-sm font-black text-[#2457ff] hover:text-blue-800"
@@ -247,9 +301,15 @@ const TICKET_COPY = {
     backToTickets: "Към моите билети",
     usedTicket: "Билетът е използван",
     validTicket: "Валиден електронен билет",
+    testTicket: "Тестов билет - не важи за вход",
     ticketDetails: "Данни за билета",
+    testDetails: "Данни за тестовото плащане",
+    testNoticeTitle: "Това не е билет за достъп до събитието",
+    testNoticeText:
+      "PDF файлът удостоверява само тестово Stripe плащане. Не са таксувани реални средства и документът не важи за вход.",
     holder: "Притежател",
     categoryAndSeat: "Категория и място",
+    testTypeAndReference: "Тестова оферта и референция",
     dateAndTime: "Дата и час",
     starts: "Начало",
     eventVenue: "Място на събитието",
@@ -258,11 +318,18 @@ const TICKET_COPY = {
     downloadPdf: "Изтегли PDF билет",
     printPdf: "Отвори за печат",
     qrAccess: "Достъп със QR код",
+    qrVerification: "Проверка на тестовата транзакция",
+    qrVerificationText:
+      "QR кодът в PDF файла служи само за проверка на тестовата транзакция. Не го показвай на входа като билет.",
     qrText:
       "Уникалният QR код се намира в PDF билета. Покажи го на входа от телефона си или на разпечатан носител.",
     keepSafe: "Пази билета си",
     keepSafeText:
       "Кодът е еднократен. Не публикувай снимка или копие преди събитието.",
+    testReminder: "Само тестова симулация",
+    testReminderText:
+      "За реални билети, актуална наличност и условия за достъп използвай посочения източник на събитието.",
+    openSource: (source: string) => `Отвори ${source || "източника"}`,
     viewEvent: "Виж събитието",
   },
   en: {
@@ -270,9 +337,15 @@ const TICKET_COPY = {
     backToTickets: "Back to my tickets",
     usedTicket: "This ticket has been used",
     validTicket: "Valid e-ticket",
+    testTicket: "Test ticket - not valid for entry",
     ticketDetails: "Ticket details",
+    testDetails: "Test payment details",
+    testNoticeTitle: "This is not an event admission ticket",
+    testNoticeText:
+      "The PDF records a Stripe test payment only. No real funds were charged, and the document is not valid for entry.",
     holder: "Holder",
     categoryAndSeat: "Category and seat",
+    testTypeAndReference: "Test offer and reference",
     dateAndTime: "Date and time",
     starts: "Starts",
     eventVenue: "Event venue",
@@ -281,14 +354,36 @@ const TICKET_COPY = {
     downloadPdf: "Download PDF ticket",
     printPdf: "Open to print",
     qrAccess: "QR code admission",
+    qrVerification: "Test transaction verification",
+    qrVerificationText:
+      "The QR code in the PDF verifies only the test transaction. Do not present it at the entrance as a ticket.",
     qrText:
       "Your unique QR code is included in the PDF ticket. Present it on your phone or as a printed copy at the entrance.",
     keepSafe: "Keep your ticket safe",
     keepSafeText:
       "The code can only be used once. Do not publish a photo or copy before the event.",
+    testReminder: "Test simulation only",
+    testReminderText:
+      "Use the attributed event source for real tickets, current availability, and entry terms.",
+    openSource: (source: string) => `Open ${source || "event source"}`,
     viewEvent: "View event",
   },
 } as const;
+
+function safeSourceUrl(value: string | undefined): string | null {
+  if (!value) {
+    return null;
+  }
+
+  try {
+    const url = new URL(value);
+    return url.protocol === "https:" && !url.username && !url.password
+      ? url.href
+      : null;
+  } catch {
+    return null;
+  }
+}
 
 function TicketDetail({
   icon,

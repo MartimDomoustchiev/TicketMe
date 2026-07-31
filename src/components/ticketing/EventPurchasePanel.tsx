@@ -3,6 +3,7 @@
 import {
   Clock3,
   CreditCard,
+  ExternalLink,
   Radio,
   ShieldCheck,
   Ticket,
@@ -14,7 +15,11 @@ import {
   formatPrice,
 } from "@/components/marketplace/catalog-ui";
 import { useLiveTicketingStatus } from "@/components/ticketing/LiveTicketingProvider";
-import type { CatalogEvent } from "@/lib/event";
+import {
+  formatDualCurrencyPrice,
+  isTestSimulationEvent,
+  type CatalogEvent,
+} from "@/lib/event";
 import { localizeHref } from "@/lib/i18n-config";
 
 type Countdown = {
@@ -26,7 +31,7 @@ type Countdown = {
 
 type Props = {
   event: CatalogEvent;
-  internalSale: boolean;
+  checkoutEnabled: boolean;
   availabilityAvailable: boolean;
   locale: "bg" | "en";
 };
@@ -44,6 +49,7 @@ const COPY = {
     minutes: "минути",
     seconds: "секунди",
     buyTicket: "Купи билет",
+    testCheckout: "Тестово Stripe плащане",
     buyAt: (source: string) => `Купи билет от ${source}`,
     soldOut: "Изчерпано",
     backToEvents: "Разгледай събитията",
@@ -51,6 +57,10 @@ const COPY = {
     connecting: "Свързване",
     secureVerified: "Сигурно Stripe плащане и потвърден имейл",
     externalSource: "Покупката се завършва при посочения източник",
+    testOffer: "TicketMe Stripe test оферта",
+    testNotice:
+      "Това е тестово плащане без реално таксуване. PDF билетът не е валиден за вход, а наличността не е официалната наличност на организатора.",
+    sourceLink: (source: string) => `Източник на събитието: ${source}`,
   },
   en: {
     ticketsFrom: "Tickets from",
@@ -64,6 +74,7 @@ const COPY = {
     minutes: "minutes",
     seconds: "seconds",
     buyTicket: "Buy ticket",
+    testCheckout: "Test Stripe payment",
     buyAt: (source: string) => `Buy at ${source}`,
     soldOut: "Sold out",
     backToEvents: "Browse events",
@@ -71,6 +82,10 @@ const COPY = {
     connecting: "Connecting",
     secureVerified: "Secure Stripe checkout and verified email",
     externalSource: "Purchase is completed with the attributed source",
+    testOffer: "TicketMe Stripe test offer",
+    testNotice:
+      "This is a test payment with no real charge. The PDF ticket is not valid for venue entry, and these counts are not the organizer's official inventory.",
+    sourceLink: (source: string) => `Event source: ${source}`,
   },
 } as const;
 
@@ -88,7 +103,7 @@ function countdownTo(target: string): Countdown {
 
 export function EventPurchasePanel({
   event,
-  internalSale,
+  checkoutEnabled,
   availabilityAvailable,
   locale,
 }: Props) {
@@ -99,6 +114,14 @@ export function EventPurchasePanel({
   const activity = liveStatus?.activity;
   const remaining = availability?.totalRemaining ?? 0;
   const soldOut = availabilityAvailable && remaining <= 0;
+  const testSimulation = isTestSimulationEvent(event);
+  const checkoutPrice = event.ticketTypes.reduce(
+    (lowest, ticketType) => Math.min(lowest, ticketType.price),
+    Number.POSITIVE_INFINITY,
+  );
+  const checkoutPriceLabel = Number.isFinite(checkoutPrice)
+    ? formatDualCurrencyPrice(checkoutPrice, locale)
+    : formatPrice(event, locale);
   const internalHref = availabilityAvailable
     ? "#tickets"
     : localizeHref(locale, "/events");
@@ -115,17 +138,19 @@ export function EventPurchasePanel({
       <div className="flex items-start justify-between gap-4">
         <div>
           <p className="text-xs font-black uppercase tracking-wider text-slate-500">
-            {internalSale
-              ? copy.ticketsFrom
+            {checkoutEnabled
+              ? testSimulation
+                ? copy.testOffer
+                : copy.ticketsFrom
               : externalSourceLabel(event, locale)}
           </p>
           <p className="mt-1 text-3xl font-black tracking-[-0.03em]">
-            {internalSale || event.priceAvailable === true
-              ? formatPrice(event, locale)
+            {checkoutEnabled || event.priceAvailable === true
+              ? checkoutPriceLabel
               : event.sourceName}
           </p>
         </div>
-        {internalSale && (
+        {checkoutEnabled && (
           <span
             className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1.5 text-[11px] font-black ${
               liveStatus?.isLive
@@ -147,11 +172,11 @@ export function EventPurchasePanel({
 
       <p className="flex items-center gap-2 text-xs font-black uppercase tracking-[0.08em] text-slate-500">
         <Clock3 size={15} className="text-blue-600" aria-hidden="true" />
-        {internalSale ? copy.saleEndsIn : copy.eventStartsIn}
+        {checkoutEnabled ? copy.saleEndsIn : copy.eventStartsIn}
       </p>
       <div
         className="mt-3 grid grid-cols-4 gap-2"
-        aria-label={internalSale ? copy.saleEndsIn : copy.eventStartsIn}
+        aria-label={checkoutEnabled ? copy.saleEndsIn : copy.eventStartsIn}
       >
         {[
           [countdown?.days, copy.days],
@@ -175,7 +200,7 @@ export function EventPurchasePanel({
         ))}
       </div>
 
-      {internalSale && availabilityAvailable && (
+      {checkoutEnabled && availabilityAvailable && (
         <div
           className="mt-4 grid grid-cols-3 gap-2"
           aria-live="polite"
@@ -201,22 +226,24 @@ export function EventPurchasePanel({
       )}
 
       <a
-        href={internalSale ? internalHref : event.sourceUrl}
-        target={internalSale ? undefined : "_blank"}
-        rel={internalSale ? undefined : "noreferrer"}
-        aria-disabled={internalSale && soldOut ? true : undefined}
+        href={checkoutEnabled ? internalHref : event.sourceUrl}
+        target={checkoutEnabled ? undefined : "_blank"}
+        rel={checkoutEnabled ? undefined : "noreferrer"}
+        aria-disabled={checkoutEnabled && soldOut ? true : undefined}
         className={`mt-5 inline-flex h-12 w-full items-center justify-center gap-2 rounded-xl px-5 text-center font-black text-white transition focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-blue-200 ${
-          internalSale && soldOut
+          checkoutEnabled && soldOut
             ? "cursor-not-allowed bg-slate-400"
             : "bg-[#2457ff] hover:bg-blue-700"
         }`}
       >
         <Ticket size={18} aria-hidden="true" />
-        {internalSale
+        {checkoutEnabled
           ? soldOut
             ? copy.soldOut
             : availabilityAvailable
-              ? copy.buyTicket
+              ? testSimulation
+                ? copy.testCheckout
+                : copy.buyTicket
               : copy.backToEvents
           : copy.buyAt(event.sourceName)}
       </a>
@@ -226,8 +253,23 @@ export function EventPurchasePanel({
           className="shrink-0 text-emerald-600"
           aria-hidden="true"
         />
-        {internalSale ? copy.secureVerified : copy.externalSource}
+        {checkoutEnabled
+          ? testSimulation
+            ? copy.testNotice
+            : copy.secureVerified
+          : copy.externalSource}
       </p>
+      {event.saleMode === "external" && (
+        <a
+          href={event.sourceUrl}
+          target="_blank"
+          rel="noreferrer"
+          className="mt-4 flex items-center justify-center gap-2 border-t border-slate-200 pt-4 text-center text-xs font-black text-[#2457ff] transition hover:text-blue-800"
+        >
+          {copy.sourceLink(event.sourceName)}
+          <ExternalLink size={14} aria-hidden="true" />
+        </a>
+      )}
     </aside>
   );
 }

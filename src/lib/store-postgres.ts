@@ -1329,6 +1329,37 @@ export async function listCheckoutReservationsForReconciliation(
   );
 }
 
+export async function listTicketDeliveriesForRetry(
+  limit = 5,
+): Promise<CheckoutReservation[]> {
+  await ensureSchema();
+  const boundedLimit = Number.isFinite(limit)
+    ? Math.max(1, Math.min(20, Math.floor(limit)))
+    : 5;
+  const rows = await databaseSql()`
+    SELECT *
+    FROM checkout_reservations
+    WHERE status = 'fulfilled'
+      AND ticket_id IS NOT NULL
+      AND (
+        delivery_status = 'pending'
+        OR (
+          delivery_status = 'processing'
+          AND (
+            delivery_lease_expires_at IS NULL
+            OR delivery_lease_expires_at <= NOW()
+          )
+        )
+      )
+    ORDER BY COALESCE(fulfilled_at, created_at) ASC, id ASC
+    LIMIT ${boundedLimit}
+  `;
+
+  return rows.map((row) =>
+    mapReservation(row as Record<string, unknown>),
+  );
+}
+
 export async function fulfillCheckoutReservation(
   input: FulfillCheckoutReservationInput,
 ): Promise<CheckoutFulfillmentResult | null> {

@@ -9,7 +9,7 @@ import {
   PRIMARY_SALE_EVENT,
 } from "../src/lib/event";
 
-test("external catalogue listings cannot allocate or reserve local inventory", async () => {
+test("external test offers reserve atomically and remain isolated by event", async () => {
   const originalCwd = process.cwd();
   const isolatedCwd = await mkdtemp(
     path.join(tmpdir(), "ticketme-external-inventory-test-"),
@@ -19,40 +19,110 @@ test("external catalogue listings cannot allocate or reserve local inventory", a
     process.chdir(isolatedCwd);
     const store = await import("../src/lib/store-file");
 
-    const externalSeed = CATALOG_EVENTS.find(
-      (event) => event.saleMode === "external" && event.id !== EVENT.id,
+    const biletTestEvent = CATALOG_EVENTS.find(
+      (event) =>
+        event.saleMode === "external" && event.id.startsWith("bilet-8347"),
     );
-    assert.ok(externalSeed);
+    assert.ok(biletTestEvent);
 
-    for (const event of [EVENT, externalSeed]) {
+    const testEvents = [EVENT, biletTestEvent] as const;
+    const initialAvailability = new Map<
+      string,
+      Awaited<ReturnType<typeof store.getAvailability>>
+    >();
+    for (const event of testEvents) {
       const availability = await store.getAvailability(event.id);
-      assert.equal(availability.totalCapacity, 0);
-      assert.equal(availability.totalRemaining, 0);
-      assert.deepEqual(availability.byType, {});
-
-      await assert.rejects(
-        store.issueTicket({
-          eventId: event.id,
-          buyerName: "External Listing Buyer",
-          buyerEmail: "buyer@example.com",
-          ticketType: "standard",
-          storageKey: "",
-          storageUrl: "",
-          qrSecret: "must-not-be-used",
-        }),
-        /INVALID_TICKET_TYPE/,
+      initialAvailability.set(event.id, availability);
+      assert.equal(
+        availability.totalCapacity,
+        event.ticketTypes.reduce(
+          (total, ticketType) => total + ticketType.capacity,
+          0,
+        ),
       );
-
-      await assert.rejects(
-        store.reserveCheckoutTicket({
-          eventId: event.id,
-          buyerName: "External Listing Buyer",
-          buyerEmail: "buyer@example.com",
-          ticketType: "standard",
-        }),
-        /INVALID_TICKET_TYPE/,
+      assert.equal(availability.totalRemaining, availability.totalCapacity);
+      assert.deepEqual(
+        availability.byType,
+        Object.fromEntries(
+          event.ticketTypes.map((ticketType) => [
+            ticketType.id,
+            ticketType.capacity,
+          ]),
+        ),
       );
     }
+
+    const deepPurpleReservation = await store.reserveCheckoutTicket({
+      eventId: EVENT.id,
+      buyerName: "Deep Purple Test Buyer",
+      buyerEmail: "deep-purple-test@example.com",
+      ticketType: "standard",
+    });
+    const deepPurpleReserved = await store.getAvailability(EVENT.id);
+    assert.equal(
+      deepPurpleReserved.totalRemaining,
+      initialAvailability.get(EVENT.id)!.totalRemaining - 1,
+    );
+    assert.equal(
+      deepPurpleReserved.byType.standard,
+      initialAvailability.get(EVENT.id)!.byType.standard - 1,
+    );
+    assert.deepEqual(
+      await store.getAvailability(biletTestEvent.id),
+      initialAvailability.get(biletTestEvent.id),
+    );
+
+    const biletReservation = await store.reserveCheckoutTicket({
+      eventId: biletTestEvent.id,
+      buyerName: "Bilet Test Buyer",
+      buyerEmail: "bilet-test@example.com",
+      ticketType: "premium",
+    });
+    const biletReserved = await store.getAvailability(biletTestEvent.id);
+    assert.equal(
+      biletReserved.totalRemaining,
+      initialAvailability.get(biletTestEvent.id)!.totalRemaining - 1,
+    );
+    assert.equal(
+      biletReserved.byType.premium,
+      initialAvailability.get(biletTestEvent.id)!.byType.premium - 1,
+    );
+
+    await store.cancelCheckoutReservation(deepPurpleReservation.id);
+    assert.deepEqual(
+      await store.getAvailability(EVENT.id),
+      initialAvailability.get(EVENT.id),
+    );
+    assert.deepEqual(
+      await store.getAvailability(biletTestEvent.id),
+      biletReserved,
+    );
+
+    await store.cancelCheckoutReservation(biletReservation.id);
+    assert.deepEqual(
+      await store.getAvailability(biletTestEvent.id),
+      initialAvailability.get(biletTestEvent.id),
+    );
+
+    const directlyIssued = await store.issueTicket({
+      eventId: EVENT.id,
+      buyerName: "Store Adapter Test Buyer",
+      buyerEmail: "store-adapter-test@example.com",
+      ticketType: "fan",
+      storageKey: "",
+      storageUrl: "",
+      qrSecret: "store-adapter-test-secret",
+    });
+    assert.equal(directlyIssued.eventId, EVENT.id);
+    assert.equal(
+      (await store.getAvailability(EVENT.id)).byType.fan,
+      initialAvailability.get(EVENT.id)!.byType.fan - 1,
+    );
+    assert.equal(await store.rollbackIssuedTicket(directlyIssued.id), true);
+    assert.deepEqual(
+      await store.getAvailability(EVENT.id),
+      initialAvailability.get(EVENT.id),
+    );
 
     const before = await store.getPurchaseActivity(
       PRIMARY_SALE_EVENT.id,

@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import { isAdminSession } from "@/lib/auth";
+import { getEventById, isTestSimulationEvent } from "@/lib/event";
 import { isSameOriginRequest } from "@/lib/request-security";
 import { getTicket, markTicketCheckedIn } from "@/lib/store";
 
@@ -68,6 +69,20 @@ export async function POST(
     return Response.json(
       { error: "Невалиден или липсващ билет." },
       { status: 404 },
+    );
+  }
+
+  const event = getEventById(existing.eventId);
+  if (event && isTestSimulationEvent(event)) {
+    if (isForm) {
+      redirect(checkInPath(id, secret, "test-ticket"));
+    }
+    return Response.json(
+      {
+        error:
+          "This QR verifies a Stripe test ticket only; it is not valid for venue check-in.",
+      },
+      { status: 422 },
     );
   }
 

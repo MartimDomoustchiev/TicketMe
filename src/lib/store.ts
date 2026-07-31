@@ -180,6 +180,15 @@ export function listCheckoutReservationsForReconciliation(
     : fileStore.listCheckoutReservationsForReconciliation(limit);
 }
 
+export function listTicketDeliveriesForRetry(
+  limit = 5,
+): Promise<CheckoutReservation[]> {
+  assertPersistenceConfigured();
+  return hasPostgres()
+    ? postgresStore.listTicketDeliveriesForRetry(limit)
+    : fileStore.listTicketDeliveriesForRetry(limit);
+}
+
 export function fulfillCheckoutReservation(
   input: FulfillCheckoutReservationInput,
 ): Promise<CheckoutFulfillmentResult | null> {

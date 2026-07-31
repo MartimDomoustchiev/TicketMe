@@ -1,7 +1,5 @@
-import {
-  findCatalogEventById,
-  isInternallySoldEvent,
-} from "@/lib/catalog";
+import { findCatalogEventById } from "@/lib/catalog";
+import { isEventOpenForTicketMeCheckout } from "@/lib/event";
 import { subscribeRealtimeAvailability } from "@/lib/realtime";
 
 export const runtime = "nodejs";
@@ -11,7 +9,7 @@ export async function GET(request: Request) {
   const eventId = new URL(request.url).searchParams.get("eventId") ?? "";
 
   const event = await findCatalogEventById(eventId);
-  if (!event || !isInternallySoldEvent(event)) {
+  if (!event || !isEventOpenForTicketMeCheckout(event)) {
     return Response.json({ error: "Event not found" }, { status: 404 });
   }
 

@@ -9,6 +9,7 @@ import {
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { isAdminSession } from "@/lib/auth";
+import { getEventById, isTestSimulationEvent } from "@/lib/event";
 import { getLocale, localizeHref } from "@/lib/i18n";
 import { getTicket } from "@/lib/store";
 
@@ -43,6 +44,8 @@ export default async function CheckInPage({
 
   const ticket = id ? await getTicket(id) : null;
   const secretMatches = Boolean(ticket && ticket.qrSecret === secret);
+  const event = ticket ? getEventById(ticket.eventId) : undefined;
+  const testSimulation = Boolean(event && isTestSimulationEvent(event));
 
   return (
     <main className="min-h-screen bg-slate-100 px-4 py-8 text-slate-950">
@@ -77,6 +80,14 @@ export default async function CheckInPage({
                 Този билет вече е бил използван.
               </StatusBox>
             )}
+            {(status === "test-ticket" ||
+              (ticket && secretMatches && testSimulation)) && (
+              <StatusBox tone="info" icon={<ShieldCheck size={20} />}>
+                QR кодът потвърждава TicketMe Stripe тестова покупка. Този
+                PDF не е валиден за вход в събитието и не може да бъде
+                маркиран като използван.
+              </StatusBox>
+            )}
             {!id && (
               <StatusBox tone="info" icon={<ScanLine size={20} />}>
                 Сканирай QR кода от PDF билета с камерата на служебния
@@ -100,14 +111,18 @@ export default async function CheckInPage({
                   <Detail
                     label="Статус"
                     value={
-                      ticket.status === "checked_in"
+                      testSimulation
+                        ? "Stripe тест - без право на вход"
+                        : ticket.status === "checked_in"
                         ? "Вече използван"
                         : "Валиден"
                     }
                   />
                 </div>
 
-                {ticket.status === "issued" && status !== "success" && (
+                {ticket.status === "issued" &&
+                  status !== "success" &&
+                  !testSimulation && (
                   <form
                     action={`/api/tickets/${ticket.id}/verify`}
                     method="post"
