@@ -10,15 +10,6 @@ import {
 } from "@/lib/store";
 import { getStripeClient, isStripeConfigured } from "@/lib/stripe";
 
-const RECONCILIATION_INTERVAL_MS = 30_000;
-
-declare global {
-  var __ticketMeStripeReconciliation:
-    | Promise<number>
-    | undefined;
-  var __ticketMeStripeReconciliationAfter: number | undefined;
-}
-
 export async function reconcileStaleStripeCheckouts(
   limit = 3,
 ): Promise<number> {
@@ -71,26 +62,4 @@ export async function reconcileStaleStripeCheckouts(
   }
 
   return reconciled;
-}
-
-export async function maybeReconcileStaleStripeCheckouts(): Promise<number> {
-  const now = Date.now();
-  if ((globalThis.__ticketMeStripeReconciliationAfter ?? 0) > now) {
-    return 0;
-  }
-
-  if (globalThis.__ticketMeStripeReconciliation) {
-    return globalThis.__ticketMeStripeReconciliation;
-  }
-
-  globalThis.__ticketMeStripeReconciliationAfter =
-    now + RECONCILIATION_INTERVAL_MS;
-  const reconciliation = reconcileStaleStripeCheckouts();
-  globalThis.__ticketMeStripeReconciliation = reconciliation;
-
-  try {
-    return await reconciliation;
-  } finally {
-    globalThis.__ticketMeStripeReconciliation = undefined;
-  }
 }

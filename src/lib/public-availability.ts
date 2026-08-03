@@ -1,15 +1,53 @@
 import "server-only";
 
+import { unstable_cache } from "next/cache";
 import type { Availability, PurchaseActivity } from "@/lib/store";
 import {
   getAvailability,
   getPurchaseActivity,
 } from "@/lib/store";
+import { singleFlight } from "@/lib/single-flight";
 
 type AvailabilityLoader = (eventId: string) => Promise<Availability>;
 type PurchaseActivityLoader = (
   eventId: string,
 ) => Promise<PurchaseActivity>;
+
+// Public pages and realtime streams run across many Vercel instances. Caching
+// these snapshots in Next's shared Data Cache prevents every instance from
+// opening its own RDS connection while keeping visible inventory within the
+// required five-second freshness window.
+const loadSharedAvailability = unstable_cache(
+  async (eventId: string) =>
+    singleFlight(
+      `database-availability:${eventId}`,
+      () => getAvailability(eventId),
+    ),
+  ["ticketme-public-availability-v1"],
+  { revalidate: 2, tags: ["ticketme-public-ticketing"] },
+);
+
+const loadSharedPurchaseActivity = unstable_cache(
+  async (eventId: string) =>
+    singleFlight(
+      `database-purchase-activity:${eventId}`,
+      () => getPurchaseActivity(eventId),
+    ),
+  ["ticketme-public-purchase-activity-v1"],
+  { revalidate: 2, tags: ["ticketme-public-ticketing"] },
+);
+
+export async function getSharedAvailability(
+  eventId: string,
+): Promise<Availability> {
+  return loadSharedAvailability(eventId);
+}
+
+export async function getSharedPurchaseActivity(
+  eventId: string,
+): Promise<PurchaseActivity> {
+  return loadSharedPurchaseActivity(eventId);
+}
 
 function errorCode(error: unknown): string {
   if (
@@ -31,7 +69,7 @@ function errorCode(error: unknown): string {
  */
 export async function getPublicAvailability(
   eventId: string,
-  loadAvailability: AvailabilityLoader = getAvailability,
+  loadAvailability: AvailabilityLoader = getSharedAvailability,
 ): Promise<Availability | null> {
   try {
     return await loadAvailability(eventId);
@@ -45,7 +83,7 @@ export async function getPublicAvailability(
 
 export async function getPublicPurchaseActivity(
   eventId: string,
-  loadActivity: PurchaseActivityLoader = getPurchaseActivity,
+  loadActivity: PurchaseActivityLoader = getSharedPurchaseActivity,
 ): Promise<PurchaseActivity> {
   try {
     return await loadActivity(eventId);

@@ -29,6 +29,16 @@ export type CheckoutDeliveryResult = {
   inProgress: boolean;
 };
 
+export function shouldStoreTicketPdf(input: {
+  storedPdfFound: boolean;
+  storageKey: string;
+  storageUrl: string;
+}): boolean {
+  return (
+    !input.storedPdfFound || !input.storageKey.trim() || !input.storageUrl.trim()
+  );
+}
+
 function checkoutReservationId(session: Stripe.Checkout.Session): string {
   const clientReferenceId = session.client_reference_id;
   const metadataId = session.metadata?.reservationId;
@@ -185,6 +195,7 @@ export async function deliverCheckoutTicket(
         id: claim.ticket.id,
         storageKey: claim.ticket.storageKey,
       }));
+    const storedPdfFound = Boolean(pdf);
 
     if (!pdf) {
       pdf = await createTicketPdf({
@@ -200,7 +211,12 @@ export async function deliverCheckoutTicket(
       storageUrl: claim.ticket.storageUrl,
     };
 
-    if (!storage.storageKey || !storage.storageUrl) {
+    if (
+      shouldStoreTicketPdf({
+        storedPdfFound,
+        ...storage,
+      })
+    ) {
       storage = await storeTicketPdf({
         id: claim.ticket.id,
         pdf,

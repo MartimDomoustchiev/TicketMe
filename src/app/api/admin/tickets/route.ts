@@ -6,7 +6,10 @@ export const dynamic = "force-dynamic";
 
 export async function GET() {
   if (!(await isAdminSession())) {
-    return Response.json({ error: "Forbidden" }, { status: 403 });
+    return Response.json(
+      { error: "Forbidden" },
+      { status: 403, headers: { "Cache-Control": "private, no-store" } },
+    );
   }
 
   const tickets = (await listTickets()).map((ticket) => ({
@@ -23,5 +26,8 @@ export async function GET() {
     status: ticket.status,
   }));
 
-  return Response.json({ tickets });
+  return Response.json(
+    { tickets },
+    { headers: { "Cache-Control": "private, no-store" } },
+  );
 }

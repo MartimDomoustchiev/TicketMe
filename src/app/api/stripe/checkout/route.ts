@@ -19,7 +19,6 @@ import {
   stripeMode,
 } from "@/lib/stripe";
 import { buildStripeCheckoutSessionParams } from "@/lib/stripe-checkout";
-import { reconcileStaleStripeCheckouts } from "@/lib/stripe-reconciliation";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -130,8 +129,6 @@ export async function POST(request: Request) {
   let stripeSessionId: string | null = null;
 
   try {
-    await reconcileStaleStripeCheckouts(3);
-
     // Stripe allows a minimum 30-minute Checkout lifetime. Use 31 minutes so
     // clock and request latency cannot put expires_at below Stripe's minimum.
     // The local reservation keeps a short webhook-delivery grace period; the

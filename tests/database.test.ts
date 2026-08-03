@@ -175,3 +175,76 @@ test("explicit request-scoped clients do not inherit the Node pool size", async 
     await client.end({ timeout: 0 });
   }
 });
+
+test("Vercel caps every instance to one direct database connection", async () => {
+  const environment = {
+    DATABASE_POOL_MAX: "9",
+    DATABASE_URL:
+      "postgresql://ticketforge:secret@localhost:5432/ticketforge",
+    VERCEL: "1",
+  };
+  const connection = resolveDatabaseConnection(environment);
+  const client = createDatabaseClient(environment);
+
+  try {
+    assert.equal(connection.poolMax, 1);
+    assert.equal(client.options.max, 1);
+    assert.equal(client.options.idle_timeout, 1);
+    assert.equal(client.options.connection.application_name, "ticketme-web");
+    assert.equal(client.options.connection.statement_timeout, 15_000);
+    assert.equal(client.options.connection.lock_timeout, 5_000);
+    assert.equal(
+      client.options.connection.idle_in_transaction_session_timeout,
+      15_000,
+    );
+    assert.equal(client.options.connection.idle_session_timeout, 5_000);
+  } finally {
+    await client.end({ timeout: 0 });
+  }
+});
+
+test("database idle-session timeout is server enforced on Vercel", async () => {
+  assert.throws(
+    () =>
+      createDatabaseClient({
+        DATABASE_IDLE_SESSION_TIMEOUT_MS: "1000",
+        DATABASE_URL:
+          "postgresql://ticketforge:secret@localhost:5432/ticketforge",
+      }),
+    /DATABASE_IDLE_SESSION_TIMEOUT_MS/,
+  );
+
+  const client = createDatabaseClient({
+    DATABASE_IDLE_SESSION_TIMEOUT_MS: "10000",
+    DATABASE_URL:
+      "postgresql://ticketforge:secret@localhost:5432/ticketforge",
+  });
+  try {
+    assert.equal(client.options.connection.idle_session_timeout, 10_000);
+  } finally {
+    await client.end({ timeout: 0 });
+  }
+});
+
+test("database statement timeout is bounded and configurable", async () => {
+  assert.throws(
+    () =>
+      createDatabaseClient({
+        DATABASE_STATEMENT_TIMEOUT_MS: "0",
+        DATABASE_URL:
+          "postgresql://ticketforge:secret@localhost:5432/ticketforge",
+      }),
+    /DATABASE_STATEMENT_TIMEOUT_MS/,
+  );
+
+  const client = createDatabaseClient({
+    DATABASE_STATEMENT_TIMEOUT_MS: "25000",
+    DATABASE_URL:
+      "postgresql://ticketforge:secret@localhost:5432/ticketforge",
+  });
+  try {
+    assert.equal(client.options.connection.statement_timeout, 25_000);
+  } finally {
+    await client.end({ timeout: 0 });
+  }
+});

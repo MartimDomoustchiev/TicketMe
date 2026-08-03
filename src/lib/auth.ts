@@ -1,3 +1,4 @@
+import { cache } from "react";
 import { cookies } from "next/headers";
 import {
   DUMMY_PASSWORD_HASH,
@@ -41,11 +42,13 @@ export type CredentialResult =
   | { status: "unverified"; user: StoredUser }
   | { status: "authenticated"; user: StoredUser };
 
-async function sessionFromCookie(): Promise<ActiveStoredSession | null> {
-  const cookieStore = await cookies();
-  const token = cookieStore.get(COOKIE_NAME)?.value;
-  return token ? findSession(token) : null;
-}
+const sessionFromCookie = cache(
+  async (): Promise<ActiveStoredSession | null> => {
+    const cookieStore = await cookies();
+    const token = cookieStore.get(COOKIE_NAME)?.value;
+    return token ? findSession(token) : null;
+  },
+);
 
 export async function authenticateCredentials(input: {
   email: string;

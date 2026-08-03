@@ -67,9 +67,14 @@ async function migrate(sql: SqlClient): Promise<void> {
 
 async function main(): Promise<void> {
   const migrationUrl = process.env.MIGRATION_DATABASE_URL?.trim();
-  const migrationEnvironment = migrationUrl
-    ? { ...process.env, DATABASE_URL: migrationUrl }
-    : process.env;
+  const migrationEnvironment = {
+    ...process.env,
+    ...(migrationUrl ? { DATABASE_URL: migrationUrl } : {}),
+    // Schema changes are an explicit deployment operation and may need more
+    // time than latency-sensitive web queries.
+    DATABASE_STATEMENT_TIMEOUT_MS:
+      process.env.MIGRATION_STATEMENT_TIMEOUT_MS?.trim() || "60000",
+  };
   const sql = createDatabaseClient(migrationEnvironment, { max: 1 });
 
   try {

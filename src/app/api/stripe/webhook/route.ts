@@ -1,5 +1,6 @@
 import { after } from "next/server";
 import type Stripe from "stripe";
+import { readTextBodyWithinLimit } from "@/lib/request-body";
 import { getBaseUrl } from "@/lib/site";
 import {
   deliverCheckoutTicket,
@@ -11,6 +12,8 @@ import { getStripeClient, getStripeWebhookSecret } from "@/lib/stripe";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 30;
+
+const MAX_WEBHOOK_BYTES = 1_000_000;
 
 function webhookResponse(
   body: Record<string, unknown>,
@@ -24,7 +27,7 @@ function webhookResponse(
 
 export async function POST(request: Request) {
   const contentLength = Number(request.headers.get("content-length") ?? "0");
-  if (Number.isFinite(contentLength) && contentLength > 1_000_000) {
+  if (Number.isFinite(contentLength) && contentLength > MAX_WEBHOOK_BYTES) {
     return webhookResponse({ error: "Payload too large." }, 413);
   }
 
@@ -35,7 +38,13 @@ export async function POST(request: Request) {
 
   let event: Stripe.Event;
   try {
-    const payload = await request.text();
+    const payload = await readTextBodyWithinLimit(
+      request,
+      MAX_WEBHOOK_BYTES,
+    );
+    if (payload === null) {
+      return webhookResponse({ error: "Payload too large." }, 413);
+    }
     event = getStripeClient().webhooks.constructEvent(
       payload,
       signature,

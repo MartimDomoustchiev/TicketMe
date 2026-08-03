@@ -1,9 +1,9 @@
 import { findCatalogEventById } from "@/lib/catalog";
 import { EVENT, isEventOpenForTicketMeCheckout } from "@/lib/event";
 import {
-  getAvailability,
-  getPurchaseActivity,
-} from "@/lib/store";
+  getPublicAvailability,
+  getPublicPurchaseActivity,
+} from "@/lib/public-availability";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -21,8 +21,8 @@ export async function GET(request: Request) {
   const checkoutEnabled = isEventOpenForTicketMeCheckout(event);
   const [availability, activity] = checkoutEnabled
     ? await Promise.all([
-        getAvailability(event.id),
-        getPurchaseActivity(event.id),
+        getPublicAvailability(event.id),
+        getPublicPurchaseActivity(event.id),
       ])
     : [null, null];
 

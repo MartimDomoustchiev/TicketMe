@@ -33,10 +33,16 @@ import {
   isCloudflareWorkerRuntime,
 } from "@/lib/database";
 
-const QUEUE_LEASE_SECONDS = 30;
-const QUEUE_MAX_WAIT_MS = 30_000;
-const QUEUE_MIN_POLL_MS = 35;
-const QUEUE_MAX_POLL_MS = 150;
+export const POSTGRES_QUEUE_POLICY = {
+  leaseSeconds: 15,
+  maxWaitMs: 8_000,
+  minRetryMs: 100,
+  maxRetryMs: 750,
+  retryJitterMs: 100,
+} as const;
+
+const QUEUE_LEASE_SECONDS = POSTGRES_QUEUE_POLICY.leaseSeconds;
+const QUEUE_MAX_WAIT_MS = POSTGRES_QUEUE_POLICY.maxWaitMs;
 const DEFAULT_RESERVATION_LIFETIME_MS = 30 * 60_000;
 const DEFAULT_DELIVERY_LEASE_MS = 5 * 60_000;
 
@@ -435,14 +441,46 @@ async function releaseExpiredInTransaction(
   return { count: rows.length, eventIds };
 }
 
-function waitBeforeQueueRetry(attempt: number): Promise<void> {
-  const delay = Math.min(
-    QUEUE_MAX_POLL_MS,
-    QUEUE_MIN_POLL_MS + attempt * 8,
+export function postgresQueueRetryDelayMs(
+  attempt: number,
+  randomValue = Math.random(),
+): number {
+  const boundedAttempt = Math.max(1, Math.min(16, Math.floor(attempt)));
+  const exponent = boundedAttempt - 1;
+  const maxBase =
+    POSTGRES_QUEUE_POLICY.maxRetryMs -
+    POSTGRES_QUEUE_POLICY.retryJitterMs;
+  const base = Math.min(
+    maxBase,
+    POSTGRES_QUEUE_POLICY.minRetryMs * (2 ** exponent),
   );
+  const normalizedRandom = Number.isFinite(randomValue)
+    ? Math.max(0, Math.min(0.999_999, randomValue))
+    : 0;
+  const jitter = Math.floor(
+    normalizedRandom * (POSTGRES_QUEUE_POLICY.retryJitterMs + 1),
+  );
+  return base + jitter;
+}
+
+function waitBeforeQueueRetry(attempt: number): Promise<void> {
+  const delay = postgresQueueRetryDelayMs(attempt);
   return new Promise((resolve) => {
     setTimeout(resolve, delay);
   });
+}
+
+function notifyAvailabilityBestEffort(eventId: string): void {
+  void readAvailability(eventId)
+    .then((availability) => {
+      emitAvailability(eventId, availability);
+    })
+    .catch((error) => {
+      console.error(
+        `Post-commit availability notification failed for ${eventId}.`,
+        error,
+      );
+    });
 }
 
 async function removeQueueRequest(requestId: string): Promise<void> {
@@ -667,17 +705,6 @@ export async function issueTicket(input: {
   try {
     while (!ticket && Date.now() < deadline) {
       const result = await db.begin(async (transaction) => {
-        const renewedRows = await transaction`
-          UPDATE purchase_queue
-          SET lease_expires_at =
-            NOW() + (${QUEUE_LEASE_SECONDS} * INTERVAL '1 second')
-          WHERE request_id = ${requestId}
-          RETURNING position
-        `;
-        if (!renewedRows[0]) {
-          return { status: "expired" as const };
-        }
-
         const lockRows = await transaction`
           SELECT pg_try_advisory_xact_lock(
             hashtext(${event.id}),
@@ -801,7 +828,7 @@ export async function issueTicket(input: {
     await removeQueueRequest(requestId).catch(() => undefined);
   }
 
-  emitAvailability(event.id, await getAvailability(event.id));
+  notifyAvailabilityBestEffort(event.id);
   return ticket;
 }
 
@@ -856,17 +883,6 @@ export async function reserveCheckoutTicket(
   try {
     while (!reservation && Date.now() < deadline) {
       const result = await db.begin(async (transaction) => {
-        const renewedRows = await transaction`
-          UPDATE purchase_queue
-          SET lease_expires_at =
-            NOW() + (${QUEUE_LEASE_SECONDS} * INTERVAL '1 second')
-          WHERE request_id = ${requestId}
-          RETURNING position
-        `;
-        if (!renewedRows[0]) {
-          return { status: "expired" as const };
-        }
-
         const lockRows = await transaction`
           SELECT pg_try_advisory_xact_lock(
             hashtext(${event.id}),
@@ -1018,7 +1034,7 @@ export async function reserveCheckoutTicket(
     await removeQueueRequest(requestId).catch(() => undefined);
   }
 
-  emitAvailability(event.id, await getAvailability(event.id));
+  notifyAvailabilityBestEffort(event.id);
   return reservation;
 }
 

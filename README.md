@@ -247,6 +247,8 @@ ticket pools. При AWS RDS връзката fail-ва затворено, ак
    DATABASE_PASSWORD="replace-only-in-env-local"
    DATABASE_SSL_CA_PATH="./global-bundle.pem"
    DATABASE_POOL_MAX="5"
+   DATABASE_IDLE_SESSION_TIMEOUT_MS=""
+   DATABASE_STATEMENT_TIMEOUT_MS="15000"
    DATABASE_AUTO_MIGRATE="false"
    ```
 
@@ -517,8 +519,11 @@ PostgreSQL през `DATABASE_URL`, когато той е конфигурир�
 | `DATABASE_URL` | production: задължителна, освен при отделни DB полета | PostgreSQL connection string за users, sessions, inventory и queue. |
 | `DATABASE_HOST`, `DATABASE_PORT`, `DATABASE_NAME`, `DATABASE_USER`, `DATABASE_PASSWORD` | алтернатива на `DATABASE_URL` | Отделни PostgreSQL connection полета с безопасно password encoding. |
 | `DATABASE_SSL_CA_PATH`, `DATABASE_SSL_CA_BASE64`, `DATABASE_SSL_CA` | AWS RDS: едно е задължително | AWS RDS CA bundle за verified TLS. |
-| `DATABASE_POOL_MAX` | не | Shared pool limit; default `5`, максимум `20`. |
+| `DATABASE_POOL_MAX` | не | Shared pool limit; default `5`, максимум `20`. Във Vercel runtime ефективният лимит е `1` на instance, за да не се изчерпва RDS connection budget при scale-out. |
+| `DATABASE_IDLE_SESSION_TIMEOUT_MS` | не | PostgreSQL server-side idle timeout; във Vercel default `5000` ms, извън Vercel default `0`. Допустими са `0` или `5000`–`60000` ms. |
+| `DATABASE_STATEMENT_TIMEOUT_MS` | не | Runtime SQL timeout; default `15000`, допустими `1000`–`60000` ms. |
 | `MIGRATION_DATABASE_URL` | не | Отделен admin/migration connection URL; fallback към normal DB config. |
+| `MIGRATION_STATEMENT_TIMEOUT_MS` | не | Timeout само за migration CLI; default `60000` ms. |
 | `DATABASE_AUTO_MIGRATE` | production: винаги `false` | Development-only runtime DDL escape hatch. |
 | `STRIPE_SECRET_KEY` | задължителна | Server-only `sk_test_` за тестово или `sk_live_` за изрично разрешено live Stripe Checkout. |
 | `STRIPE_PUBLISHABLE_KEY` | задължителна | Matching `pk_test_`/`pk_live_` ключ за Stripe.js; безопасен е за browser, но се подава server-side само при съвпадащ mode. |

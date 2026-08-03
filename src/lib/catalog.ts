@@ -1,5 +1,6 @@
 import "server-only";
 
+import { unstable_cache } from "next/cache";
 import {
   CATALOG_EVENTS,
   formatEventDate,
@@ -21,6 +22,15 @@ import {
 } from "@/lib/catalog-postgres";
 import type { CatalogEventRecord } from "@/lib/catalog-types";
 import { isDatabaseConfigured } from "@/lib/database";
+import { singleFlight } from "@/lib/single-flight";
+
+export const PUBLIC_CATALOG_CACHE_TAG = "ticketme-public-catalog";
+
+const PUBLIC_CATALOG_CACHE_REVALIDATE_SECONDS = 30;
+const publicCatalogCacheOptions = {
+  revalidate: PUBLIC_CATALOG_CACHE_REVALIDATE_SECONDS,
+  tags: [PUBLIC_CATALOG_CACHE_TAG],
+};
 
 /**
  * Async catalogue boundary. The static seed catalogue remains a dependable
@@ -34,10 +44,12 @@ export async function listCatalogEvents(): Promise<readonly CatalogEvent[]> {
   }
 
   try {
-    const discovered = await loadPublishedDiscoveries();
+    const discovered = await loadCachedPublishedDiscoveries();
     return mergeCatalogues(
       staticEvents,
-      discovered.map(mapDiscoveredEvent),
+      discovered
+        .map(mapDiscoveredEvent)
+        .filter((event) => isEventUpcoming(event)),
     );
   } catch (error) {
     reportCatalogFallback(error);
@@ -75,6 +87,32 @@ async function loadPublishedDiscoveries(): Promise<CatalogEventRecord[]> {
   ].slice(0, total);
 }
 
+const loadCachedPublishedDiscoveries = unstable_cache(
+  () => singleFlight("database-catalog:list", loadPublishedDiscoveries),
+  ["ticketme-public-catalog-list-v1"],
+  publicCatalogCacheOptions,
+);
+
+const getCachedPublishedCatalogEventById = unstable_cache(
+  async (id: string) =>
+    singleFlight(
+      `database-catalog:id:${id}`,
+      () => getPublishedCatalogEventById(id),
+    ),
+  ["ticketme-public-catalog-event-by-id-v1"],
+  publicCatalogCacheOptions,
+);
+
+const getCachedPublishedCatalogEventBySlug = unstable_cache(
+  async (slug: string) =>
+    singleFlight(
+      `database-catalog:slug:${slug}`,
+      () => getPublishedCatalogEventBySlug(slug),
+    ),
+  ["ticketme-public-catalog-event-by-slug-v1"],
+  publicCatalogCacheOptions,
+);
+
 export async function findCatalogEventById(
   id: string,
 ): Promise<CatalogEvent | undefined> {
@@ -86,7 +124,7 @@ export async function findCatalogEventById(
   }
 
   try {
-    const discovered = await getPublishedCatalogEventById(id);
+    const discovered = await getCachedPublishedCatalogEventById(id);
     if (discovered) {
       const mapped = preserveStaticCheckout(
         mapDiscoveredEvent(discovered),
@@ -112,7 +150,7 @@ export async function findCatalogEventBySlug(
   }
 
   try {
-    const discovered = await getPublishedCatalogEventBySlug(slug);
+    const discovered = await getCachedPublishedCatalogEventBySlug(slug);
     if (discovered) {
       const mapped = preserveStaticCheckout(
         mapDiscoveredEvent(discovered),

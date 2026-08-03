@@ -12,6 +12,8 @@ type DatabaseEnvironment = {
   DATABASE_PASSWORD?: string;
   DATABASE_POOL_MAX?: string;
   DATABASE_PORT?: string;
+  DATABASE_IDLE_SESSION_TIMEOUT_MS?: string;
+  DATABASE_STATEMENT_TIMEOUT_MS?: string;
   DATABASE_SSL_CA?: string;
   DATABASE_SSL_CA_BASE64?: string;
   DATABASE_SSL_CA_PATH?: string;
@@ -19,6 +21,7 @@ type DatabaseEnvironment = {
   DATABASE_USER?: string;
   MIGRATION_DATABASE_URL?: string;
   NODE_ENV?: string;
+  VERCEL?: string;
 };
 
 type DatabaseSsl =
@@ -185,6 +188,44 @@ function poolMax(env: DatabaseEnvironment): number {
   if (!Number.isInteger(parsed) || parsed < 1 || parsed > 20) {
     throw new Error("DATABASE_POOL_MAX must be an integer from 1 to 20.");
   }
+
+  // Each Fluid Compute instance owns its own module-global pool. A burst can
+  // therefore multiply this value by the number of active Vercel instances
+  // and exhaust a small RDS instance even when every query is short. Keep one
+  // direct connection per instance until the deployment is placed behind a
+  // server-side transaction pooler.
+  return env.VERCEL === "1" ? 1 : parsed;
+}
+
+function statementTimeoutMs(env: DatabaseEnvironment): number {
+  const parsed = Number.parseInt(
+    env.DATABASE_STATEMENT_TIMEOUT_MS?.trim() || "15000",
+    10,
+  );
+  if (!Number.isInteger(parsed) || parsed < 1_000 || parsed > 60_000) {
+    throw new Error(
+      "DATABASE_STATEMENT_TIMEOUT_MS must be an integer from 1000 to 60000.",
+    );
+  }
+  return parsed;
+}
+
+function idleSessionTimeoutMs(env: DatabaseEnvironment): number {
+  const fallback = env.VERCEL === "1" ? "5000" : "0";
+  const parsed = Number.parseInt(
+    env.DATABASE_IDLE_SESSION_TIMEOUT_MS?.trim() || fallback,
+    10,
+  );
+  if (
+    !Number.isInteger(parsed) ||
+    parsed < 0 ||
+    (parsed > 0 && parsed < 5_000) ||
+    parsed > 60_000
+  ) {
+    throw new Error(
+      "DATABASE_IDLE_SESSION_TIMEOUT_MS must be 0 or an integer from 5000 to 60000.",
+    );
+  }
   return parsed;
 }
 
@@ -237,15 +278,29 @@ export function createDatabaseClient(
   const connection = resolveDatabaseConnection(env);
   const requestScoped =
     options.requestScoped ?? isCloudflareWorkerRuntime();
+  const vercelRuntime = env.VERCEL === "1";
 
   return postgres(connection.url, {
     connect_timeout: 10,
     // Cloudflare does not allow a TCP socket created by one request to be
     // reused by another request. A short lifetime releases a request-local
     // connection promptly; Hyperdrive provides pooling outside the Worker.
-    idle_timeout: requestScoped ? 1 : 20,
-    max: requestScoped ? 1 : (options.max ?? connection.poolMax),
+    idle_timeout: requestScoped || vercelRuntime ? 1 : 20,
+    max:
+      requestScoped || vercelRuntime
+        ? 1
+        : (options.max ?? connection.poolMax),
     prepare: false,
+    connection: {
+      application_name: "ticketme-web",
+      statement_timeout: statementTimeoutMs(env),
+      lock_timeout: 5_000,
+      idle_in_transaction_session_timeout: 15_000,
+      // Vercel can suspend an instance before Postgres.js's local idle timer
+      // fires. The database-side timer keeps those frozen sockets from
+      // accumulating until the small RDS instance reaches max_connections.
+      idle_session_timeout: idleSessionTimeoutMs(env),
+    },
     ...(requestScoped ? { max_lifetime: 1 } : {}),
     ...(connection.ssl === undefined ? {} : { ssl: connection.ssl }),
   });
