@@ -34,8 +34,8 @@ export async function generateMetadata(): Promise<Metadata> {
         : "Вход или създаване на профил",
     description:
       locale === "en"
-        ? "Securely access your TicketMe account and tickets."
-        : "Сигурен достъп до твоя TicketMe профил и билети.",
+        ? "Securely access your Tiketko account and tickets."
+        : "Сигурен достъп до твоя Tiketko профил и билети.",
     robots: {
       index: false,
       follow: true,
@@ -142,7 +142,7 @@ export default async function LoginPage({
             <span className="inline-flex h-11 w-11 items-center justify-center rounded-xl bg-[#2864ff] shadow-[0_12px_36px_rgba(40,100,255,0.4)]">
               <Ticket size={22} aria-hidden="true" />
             </span>
-            <span className="text-xl">TicketMe</span>
+            <span className="text-xl">Tiketko</span>
           </Link>
 
           <div className="my-auto max-w-xl py-14">
@@ -199,7 +199,7 @@ export default async function LoginPage({
               <span className="inline-flex h-9 w-9 items-center justify-center rounded-[0.7rem] bg-[#2864ff] text-white">
                 <Ticket size={18} aria-hidden="true" />
               </span>
-              TicketMe
+              Tiketko
             </Link>
 
             <div className="ml-auto flex items-center gap-2 sm:gap-4">
@@ -306,7 +306,7 @@ function HeroFeature({
 
 const PAGE_COPY = {
   bg: {
-    homeAria: "TicketMe — начална страница",
+    homeAria: "Tiketko — начална страница",
     eyebrow: "Твоят достъп до незабравими събития",
     heroTitle: "Всички преживявания. Един сигурен профил.",
     heroText:
@@ -334,7 +334,7 @@ const PAGE_COPY = {
     privacy: "Поверителност",
   },
   en: {
-    homeAria: "TicketMe — home",
+    homeAria: "Tiketko — home",
     eyebrow: "Your access to unforgettable events",
     heroTitle: "Every experience. One secure account.",
     heroText:

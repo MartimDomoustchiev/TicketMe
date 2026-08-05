@@ -9,12 +9,12 @@ export async function generateMetadata(): Promise<Metadata> {
   return locale === "en"
     ? {
         title: "Terms of use",
-        description: "Terms for using TicketMe and its e-tickets.",
+        description: "Terms for using Tiketko and its e-tickets.",
       }
     : {
         title: "Условия за ползване",
         description:
-          "Условия за използване на TicketMe и електронните билети.",
+          "Условия за използване на Tiketko и електронните билети.",
       };
 }
 
@@ -83,7 +83,7 @@ const TERMS_COPY = {
     updated: "Последна актуализация: 27 юли 2026 г.",
     scopeTitle: "1. Обхват",
     scope:
-      "TicketMe предоставя каталог със събития, информация за наличност и възможност за издаване на електронни билети. С използването на услугата приемате настоящите условия.",
+      "Tiketko предоставя каталог със събития, информация за наличност и възможност за издаване на електронни билети. С използването на услугата приемате настоящите условия.",
     accountTitle: "2. Профил и потвърждение",
     account:
       "За издаване на билет е необходим валиден и потвърден имейл. Потребителят носи отговорност за коректността на въведените име и имейл и за сигурността на достъпа до своята поща.",
@@ -107,7 +107,7 @@ const TERMS_COPY = {
     updated: "Last updated: 27 July 2026",
     scopeTitle: "1. Scope",
     scope:
-      "TicketMe provides an event catalogue, availability information and electronic ticket issuance. By using the service, you agree to these terms.",
+      "Tiketko provides an event catalogue, availability information and electronic ticket issuance. By using the service, you agree to these terms.",
     accountTitle: "2. Account and verification",
     account:
       "A valid, verified email address is required before a ticket can be issued. You are responsible for the accuracy of your name and email and for keeping access to your inbox secure.",

@@ -45,7 +45,7 @@ export function normalizeMailFrom(
     return null;
   }
 
-  return `TicketMe <${address}>`;
+  return `Tiketko <${address}>`;
 }
 
 function usesResendTestingDomain(
@@ -180,8 +180,8 @@ function emailDocument(input: {
               <td style="background:#10172a;padding:24px 32px;">
                 <table role="presentation" cellspacing="0" cellpadding="0" border="0">
                   <tr>
-                    <td style="background:#2457ff;border-radius:7px;color:#ffffff;font-size:12px;font-weight:700;letter-spacing:.4px;padding:8px 9px;">TM</td>
-                    <td style="padding-left:12px;color:#ffffff;font-size:20px;font-weight:700;">TicketMe</td>
+                    <td style="background:#2457ff;border-radius:7px;color:#ffffff;font-size:12px;font-weight:700;letter-spacing:.4px;padding:8px 9px;">TK</td>
+                    <td style="padding-left:12px;color:#ffffff;font-size:20px;font-weight:700;">Tiketko</td>
                   </tr>
                 </table>
               </td>
@@ -308,18 +308,18 @@ export async function sendVerificationEmail(input: {
   return sendEmail({
     to: input.to,
     subject: isEnglish
-      ? "Verify your email | TicketMe"
-      : "Потвърди имейла си | TicketMe",
+      ? "Verify your email | Tiketko"
+      : "Потвърди имейла си | Tiketko",
     html: emailDocument({
       locale,
       preheader: isEnglish
-        ? "Verify your email to activate your TicketMe account."
-        : "Потвърди имейла си, за да активираш профила си в TicketMe.",
+        ? "Verify your email to activate your Tiketko account."
+        : "Потвърди имейла си, за да активираш профила си в Tiketko.",
       eyebrow: isEnglish ? "Secure account activation" : "Сигурно активиране",
       title: isEnglish ? `Welcome, ${safeName}` : `Добре дошъл, ${safeName}`,
       introduction: isEnglish
-        ? "Confirm that this email belongs to you and finish creating your TicketMe account."
-        : "Потвърди, че този имейл е твой, и завърши създаването на профила си в TicketMe.",
+        ? "Confirm that this email belongs to you and finish creating your Tiketko account."
+        : "Потвърди, че този имейл е твой, и завърши създаването на профила си в Tiketko.",
       actionLabel: isEnglish
         ? "Verify email and activate account"
         : "Потвърди имейла и активирай профила",
@@ -328,8 +328,8 @@ export async function sendVerificationEmail(input: {
         ? "This secure link is valid for 30 minutes. If the button does not open, use the link below."
         : "Сигурният линк важи 30 минути. Ако бутонът не се отвори, използвай адреса по-долу.",
       footerText: isEnglish
-        ? "If you did not create this account, you can safely ignore this message. TicketMe will never ask for your password by email."
-        : "Ако не си създавал този профил, можеш спокойно да игнорираш съобщението. TicketMe никога няма да поиска паролата ти по имейл.",
+        ? "If you did not create this account, you can safely ignore this message. Tiketko will never ask for your password by email."
+        : "Ако не си създавал този профил, можеш спокойно да игнорираш съобщението. Tiketko никога няма да поиска паролата ти по имейл.",
     }),
   });
 }
@@ -432,11 +432,11 @@ export async function sendTicketEmail(input: {
       actionUrl: safeUrl,
       secondaryText: simulation
         ? isEnglish
-          ? `The PDF is stored in your TicketMe account. For current event tickets, availability, and entry terms, visit ${sourceReference}.`
-          : `PDF файлът е съхранен в TicketMe профила ти. За актуални билети, наличност и условия за достъп посети ${sourceReference}.`
+          ? `The PDF is stored in your Tiketko account. For current event tickets, availability, and entry terms, visit ${sourceReference}.`
+          : `PDF файлът е съхранен в Tiketko профила ти. За актуални билети, наличност и условия за достъп посети ${sourceReference}.`
         : isEnglish
-          ? "The same ticket is stored securely in your TicketMe account. If the button does not open, use the link below."
-          : "Същият билет е съхранен сигурно в TicketMe профила ти. Ако бутонът не се отвори, използвай адреса по-долу.",
+          ? "The same ticket is stored securely in your Tiketko account. If the button does not open, use the link below."
+          : "Същият билет е съхранен сигурно в Tiketko профила ти. Ако бутонът не се отвори, използвай адреса по-долу.",
       footerText: simulation
         ? isEnglish
           ? `Test record ID: ${escapeHtml(input.ticketId)} · Not valid for entry · The QR code verifies only this test transaction.`

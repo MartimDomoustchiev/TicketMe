@@ -91,10 +91,10 @@ test("Resend test-domain recipient restrictions fall back only in development", 
     assert.doesNotMatch(outbox, /Local <Candidate>/);
     assert.equal(
       JSON.parse(requestBodies[0])?.from,
-      "TicketMe <onboarding@resend.dev>",
+      "Tiketko <onboarding@resend.dev>",
     );
 
-    setEnvironment("MAIL_FROM", "TicketMe <tickets@verified.example>");
+    setEnvironment("MAIL_FROM", "Tiketko <tickets@verified.example>");
     await assert.rejects(
       sendVerificationEmail({
         to: "candidate@example.com",
@@ -106,7 +106,7 @@ test("Resend test-domain recipient restrictions fall back only in development", 
     );
 
     setEnvironment("NODE_ENV", "production");
-    setEnvironment("MAIL_FROM", "TicketMe <onboarding@resend.dev>");
+    setEnvironment("MAIL_FROM", "Tiketko <onboarding@resend.dev>");
     await assert.rejects(
       sendVerificationEmail({
         to: "candidate@example.com",
@@ -127,21 +127,21 @@ test("Resend test-domain recipient restrictions fall back only in development", 
   }
 });
 
-test("sender normalization preserves the verified address and enforces the TicketMe brand", () => {
+test("sender normalization preserves the verified address and enforces the Tiketko brand", () => {
   assert.equal(
     normalizeMailFrom("TicketForge <tickets@mail.example.com>"),
-    "TicketMe <tickets@mail.example.com>",
+    "Tiketko <tickets@mail.example.com>",
   );
   assert.equal(
     normalizeMailFrom("tickets@mail.example.com"),
-    "TicketMe <tickets@mail.example.com>",
+    "Tiketko <tickets@mail.example.com>",
   );
   assert.equal(
-    normalizeMailFrom("TicketMe <first@example.com>, second@example.com"),
+    normalizeMailFrom("Tiketko <first@example.com>, second@example.com"),
     null,
   );
   assert.equal(
-    normalizeMailFrom("TicketMe <tickets@example.com>\r\nBcc: bad@example.com"),
+    normalizeMailFrom("Tiketko <tickets@example.com>\r\nBcc: bad@example.com"),
     null,
   );
 });
@@ -183,7 +183,7 @@ test("test-payment email attaches the PDF, links the source, and denies admissio
     "RESEND_BASE_URL",
     `http://127.0.0.1:${address.port}`,
   );
-  setEnvironment("MAIL_FROM", "TicketMe <tickets@mail.example.com>");
+  setEnvironment("MAIL_FROM", "Tiketko <tickets@mail.example.com>");
 
   try {
     const pdf = new TextEncoder().encode("%PDF-1.7 test simulation");
@@ -193,7 +193,7 @@ test("test-payment email attaches the PDF, links the source, and denies admissio
       ticketId: "TKT-SIMULATION-EN",
       eventName: "Source Event",
       downloadUrl:
-        "https://www.ticketme.store/api/tickets/TKT-SIMULATION-EN/download",
+        "https://www.tiketko.top/api/tickets/TKT-SIMULATION-EN/download",
       pdf,
       locale: "en",
       offerKind: "test-simulation",
@@ -209,7 +209,7 @@ test("test-payment email attaches the PDF, links the source, and denies admissio
       ticketId: "TKT-SIMULATION-BG",
       eventName: "Тестово събитие",
       downloadUrl:
-        "https://www.ticketme.store/api/tickets/TKT-SIMULATION-BG/download",
+        "https://www.tiketko.top/api/tickets/TKT-SIMULATION-BG/download",
       pdf,
       locale: "bg",
       offerKind: "test-simulation",
@@ -278,10 +278,10 @@ test("arbitrary-recipient readiness requires a custom sender domain", () => {
 
   try {
     setEnvironment("RESEND_API_KEY", "resend-local-test-key");
-    setEnvironment("MAIL_FROM", "TicketMe <onboarding@resend.dev>");
+    setEnvironment("MAIL_FROM", "Tiketko <onboarding@resend.dev>");
     assert.equal(isEmailReadyForArbitraryRecipients(), false);
 
-    setEnvironment("MAIL_FROM", "TicketMe <tickets@mail.example.com>");
+    setEnvironment("MAIL_FROM", "Tiketko <tickets@mail.example.com>");
     assert.equal(isEmailReadyForArbitraryRecipients(), true);
 
     setEnvironment("RESEND_API_KEY", undefined);

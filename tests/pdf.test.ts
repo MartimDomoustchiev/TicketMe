@@ -109,7 +109,7 @@ test("ticket themes are deterministic and vary by event and ticket", () => {
   );
 });
 
-test("generated ticket is a compact TicketMe PDF with mixed-script data", async () => {
+test("generated ticket is a compact Tiketko PDF with mixed-script data", async () => {
   const ticket = testTicket();
   const pdf = await createTicketPdf({
     ticket,
@@ -124,14 +124,14 @@ test("generated ticket is a compact TicketMe PDF with mixed-script data", async 
   const document = await PDFDocument.load(pdf, { updateMetadata: false });
   assert.equal(document.getPageCount(), 1);
   assert.equal(document.getTitle(), `${ticket.eventName} | ${ticket.id}`);
-  assert.equal(document.getAuthor(), "TicketMe");
-  assert.equal(document.getCreator(), "TicketMe");
-  assert.equal(document.getProducer(), "TicketMe PDF service");
+  assert.equal(document.getAuthor(), "Tiketko");
+  assert.equal(document.getCreator(), "Tiketko");
+  assert.equal(document.getProducer(), "Tiketko PDF service");
   assert.equal(
     document.getSubject(),
-    "Official TicketMe digital admission ticket",
+    "Official Tiketko digital admission ticket",
   );
-  assert.ok(document.getKeywords()?.includes("TicketMe"));
+  assert.ok(document.getKeywords()?.includes("Tiketko"));
   assert.deepEqual(document.getPage(0).getSize(), {
     width: 720,
     height: 360,
@@ -188,7 +188,7 @@ test("test-payment PDFs are visibly marked and never claim venue admission", asy
     assert.equal(document.getPageCount(), 1);
     assert.equal(
       document.getSubject(),
-      "TicketMe test payment record - not valid for entry",
+      "Tiketko test payment record - not valid for entry",
     );
     assert.doesNotMatch(
       document.getKeywords() ?? "",
@@ -320,7 +320,7 @@ test("premium layout preserves critical long values and QR safety invariants", a
       );
     }
   }
-  for (const criticalValue of ["TicketMe", "ZONE / ACCESS"]) {
+  for (const criticalValue of ["Tiketko", "ZONE / ACCESS"]) {
     assert.ok(
       normalized.includes(normalizeExtractedText(criticalValue)),
       `PDF text must contain ${criticalValue}`,
@@ -357,7 +357,7 @@ test("Bulgarian ticket copy remains extractable", async (context) => {
     "Йоана Георгиева",
     "ЗОНА / ДОСТЪП",
     "ЗОНА-А-ВХОД-2",
-    "TicketMe",
+    "Tiketko",
   ]) {
     assert.ok(normalized.includes(value), `PDF text must contain ${value}`);
   }

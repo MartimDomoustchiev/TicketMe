@@ -4,7 +4,7 @@ import { readTextBodyWithinLimit } from "../src/lib/request-body";
 
 test("bounded body reader preserves an in-limit UTF-8 payload", async () => {
   const payload = JSON.stringify({ message: "Здравей" });
-  const request = new Request("https://ticketme.store/webhook", {
+  const request = new Request("https://tiketko.top/webhook", {
     method: "POST",
     body: payload,
   });
@@ -24,7 +24,7 @@ test("bounded body reader rejects chunked payloads beyond the limit", async () =
       controller.close();
     },
   });
-  const request = new Request("https://ticketme.store/webhook", {
+  const request = new Request("https://tiketko.top/webhook", {
     method: "POST",
     body: stream,
     duplex: "half",

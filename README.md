@@ -1,12 +1,12 @@
-# TicketMe
+# Tiketko
 
-TicketMe е multi-event платформа за откриване и заявяване на билети с
+Tiketko е multi-event платформа за откриване и заявяване на билети с
 production-oriented архитектура. Интерфейсът е локализиран на български и
 английски и е оптимизиран за desktop и mobile.
 
 Началният snapshot съдържа **126 source listings**: 125 публични записа от
 Bilet.bg и едно featured събитие от Eventim, плюс едно изрично first-party
-TicketMe събитие. Всеки бъдещ static listing има отделна TicketMe Stripe test
+Tiketko събитие. Всеки бъдещ static listing има отделна Tiketko Stripe test
 оферта и запазен линк към оригиналния източник. Изтеклите записи автоматично
 отпадат от публичния каталог. Към него могат да се добавят публикувани записи
 от постоянния discovery каталог в PostgreSQL; новите discovery-only записи
@@ -17,7 +17,7 @@ Snapshot-ът е нормализиран от публичния календа
 [Deep Purple в Eventim](https://www.eventim.bg/en/artist/deep-purple/).
 
 > [!IMPORTANT]
-> Source данните не са TicketMe inventory. За source listings приложението
+> Source данните не са Tiketko inventory. За source listings приложението
 > показва отделни симулационни цени и наличности, които не са официални данни
 > на организатора. Stripe flow-ът работи само с matching `sk_test_` и `pk_test_`
 > ключове; генерираният PDF е ясно маркиран „не важи за вход“. Оригиналният
@@ -37,9 +37,9 @@ Snapshot-ът е нормализиран от публичния календа
 - Единна email/password login страница за клиенти и администратори.
 - Професионална регистрация с password strength, email verification и
   отделни роли в базата.
-- Embedded Stripe test Checkout в страницата на TicketMe, само за потребители
+- Embedded Stripe test Checkout в страницата на Tiketko, само за потребители
   с потвърден имейл. Картовите полета и допустимите Apple Pay/Google Pay wallet
-  бутони се рендерират от Stripe; TicketMe никога не получава card данните.
+  бутони се рендерират от Stripe; Tiketko никога не получава card данните.
 - FIFO reservation преди плащане и idempotent fulfillment след подписан
   Stripe webhook; PDF/storage/email I/O остава извън allocation транзакцията.
 - Ticket-category модел с отделен капацитет и цена за first-party admission и
@@ -164,7 +164,7 @@ API routes и static/metadata assets остават без prefix. Sitemap-ът 
    `payment_method_types: ["card"]` и връща еднократен `client_secret` само на
    потвърдения buyer. `sk_test_` и `whsec_` остават server-only; `pk_test_` е
    publishable browser ключ от същия Stripe sandbox.
-4. Stripe.js монтира provider-owned формата вътре в TicketMe. Stripe рендерира
+4. Stripe.js монтира provider-owned формата вътре в Tiketko. Stripe рендерира
    card полетата и допустимите Apple Pay/Google Pay бутони според browser,
    устройство, държава и wallet настройка.
 5. Подписаният webhook валидира paid status, amount, currency, reservation и
@@ -175,7 +175,7 @@ API routes и static/metadata assets остават без prefix. Sitemap-ът 
    API, така че платена сесия се изпълнява, а expired сесия освобождава мястото
    дори без browser return. Stripe остава authoritative за крайния status.
 7. Delivery worker генерира QR/PDF, качва го в private object storage и
-   изпраща Resend email. Success панелът остава в TicketMe и дава detail,
+   изпраща Resend email. Success панелът остава в Tiketko и дава detail,
    download и print actions.
 
 В local JSON режим reservation договорът се сериализира от in-process FIFO
@@ -318,7 +318,7 @@ GEMINI_API_KEY=""
    `EVENT_DISCOVERY_AUTO_PUBLISH=true` го публикува автоматично.
 6. Публичният каталог, event страниците и sitemap-ът включват само
    `published` бъдещи записи. Новите discovery-only external listings не
-   получават автоматично TicketMe inventory или Stripe оферта и водят към
+   получават автоматично Tiketko inventory или Stripe оферта и водят към
    оригиналния source URL; static test офертите се конфигурират отделно в
    source кода и не се извличат от feed-а.
 
@@ -362,9 +362,9 @@ npm run db:migrate
 ### Payments: embedded Stripe Checkout в test mode
 
 Активният school-project flow използва embedded Stripe Checkout с matching
-test secret и publishable key. TicketMe създава Session server-side, а Stripe.js
+test secret и publishable key. Tiketko създава Session server-side, а Stripe.js
 монтира защитената форма в checkout панела; чувствителните card/wallet данни
-никога не преминават през TicketMe сървъра. Card rail-ът позволява Stripe да
+никога не преминават през Tiketko сървъра. Card rail-ът позволява Stripe да
 покаже Apple Pay или Google Pay, когато browser-ът и wallet-ът са допустими.
 
 При `sk_test_` се използва test mode. За стандартен тест се използва Stripe card
@@ -454,7 +454,7 @@ browser, устройство, държава и wallet setup; Stripe решав
 ### Resend за произволни получатели
 
 `onboarding@resend.dev` е само тестов sender и може да изпраща единствено до
-email адреса на собственика на Resend акаунта. Кодът на TicketMe не
+email адреса на собственика на Resend акаунта. Кодът на Tiketko не
 ограничава получателите, но реална доставка до Gmail, Outlook, Yahoo или
 корпоративен адрес изисква собствен потвърден sending domain:
 
@@ -466,7 +466,7 @@ email адреса на собственика на Resend акаунта. Ко�
 4. Промени server-only конфигурацията и рестартирай приложението:
 
    ```dotenv
-   MAIL_FROM="TicketMe <tickets@mail.your-domain.com>"
+   MAIL_FROM="Tiketko <tickets@mail.your-domain.com>"
    ```
 
 След това същият signup и ticket-delivery код изпраща до всеки валиден
@@ -495,7 +495,7 @@ PostgreSQL през `DATABASE_URL`, когато той е конфигурир�
    при конфигуриран Resend отвори линка от получения email. Потвърждението
    създава сесия.
 4. Избери категория и натисни „Плати тестово със Stripe“. Реалната Stripe test
-   форма се отваря в TicketMe, без redirect. Използвай
+   форма се отваря в Tiketko, без redirect. Използвай
    `4242 4242 4242 4242`, бъдеща дата и произволен CVC.
 5. На допустимо устройство провери Apple Pay в Safari 17+ или Google Pay в
    Chrome с настроен wallet. Stripe решава кой wallet button да покаже.
@@ -615,7 +615,7 @@ Git или да се споделят в screenshots. `sk_test_`, `sk_live_` и 
   работа при несъществуващ email, за да намали timing разликите.
 - Ticket page и PDF download проверяват buyer ownership или admin role.
 - Embedded Stripe Checkout обработва card/wallet полетата в provider-owned
-  iframe вътре в TicketMe; приложението не получава PAN, CVC или wallet
+  iframe вътре в Tiketko; приложението не получава PAN, CVC или wallet
   credentials.
 - Checkout creation изисква потвърдена buyer session, same-origin заявка,
   валиден server-only Stripe key и server-side event/category/amount validation.
@@ -704,11 +704,11 @@ PostgreSQL и object storage, browser E2E тестове за login/checkout/adm
 - **Vercel** — Next.js приложението, custom domain и daily Cron trigger;
 - **AWS RDS PostgreSQL** — users, sessions, inventory и durable FIFO queue;
 - **Embedded Stripe Checkout test mode** — active in-site test payment flow;
-- **Resend** — verification и ticket email от верифициран TicketMe domain;
+- **Resend** — verification и ticket email от верифициран Tiketko domain;
 - **AWS S3 или Cloudflare R2** — private PDF storage.
 
 `npm run build:sites` изгражда минимален 308 redirect към каноничния
-`https://www.ticketme.store`, като запазва path-а и query параметрите. Така
+`https://www.tiketko.top`, като запазва path-а и query параметрите. Така
 private Sites release-ът не създава втори commerce origin със самостоятелни
 cookies, webhook-и и payment callbacks. За пълен Cloudflare/OpenNext bundle
 използвай `npm run build:cloudflare`.

@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 1000" role="img" aria-labelledby="title description">
-  <title id="title">TicketMe Live: The Next Wave</title>
-  <desc id="description">Abstract electric blue concert poster for TicketMe Live 2027.</desc>
+  <title id="title">Tiketko Live: The Next Wave</title>
+  <desc id="description">Abstract electric blue concert poster for Tiketko Live 2027.</desc>
   <defs>
     <linearGradient id="background" x1="0" y1="0" x2="1" y2="1">
       <stop offset="0" stop-color="#050b20"/>
@@ -51,11 +51,11 @@
     <g filter="url(#soft-glow)">
       <path d="M0 8h54c22 0 40 18 40 40v8c0 22-18 40-40 40H0V70h20V34H0V8Zm54 26H46v36h8c8 0 14-6 14-14v-8c0-8-6-14-14-14Z" fill="#fff"/>
     </g>
-    <text x="122" y="73" fill="#fff" font-family="Arial, Helvetica, sans-serif" font-size="58" font-weight="800" letter-spacing="-2">TicketMe</text>
+    <text x="122" y="73" fill="#fff" font-family="Arial, Helvetica, sans-serif" font-size="58" font-weight="800" letter-spacing="-2">Tiketko</text>
   </g>
 
   <g transform="translate(112 340)">
-    <text fill="#8fb1ff" font-family="Arial, Helvetica, sans-serif" font-size="28" font-weight="700" letter-spacing="8">TICKETME PRESENTS</text>
+    <text fill="#8fb1ff" font-family="Arial, Helvetica, sans-serif" font-size="28" font-weight="700" letter-spacing="8">TIKETKO PRESENTS</text>
     <text y="120" fill="#fff" font-family="Arial, Helvetica, sans-serif" font-size="112" font-weight="900" letter-spacing="-5">THE NEXT</text>
     <text y="230" fill="url(#wave)" font-family="Arial, Helvetica, sans-serif" font-size="112" font-weight="900" letter-spacing="-5">WAVE</text>
     <rect y="282" width="735" height="2" fill="#fff" opacity=".2"/>

@@ -35,7 +35,7 @@ export function buildStripeCheckoutSessionParams(
     ui_mode: "embedded_page",
     redirect_on_completion: "never",
     branding_settings: {
-      display_name: "TicketMe",
+      display_name: "Tiketko",
       background_color: "#ffffff",
       button_color: "#1d4ed8",
       border_style: "rounded",

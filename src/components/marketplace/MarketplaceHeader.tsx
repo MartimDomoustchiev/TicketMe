@@ -78,7 +78,7 @@ export async function MarketplaceHeader({
                   : "hidden min-[360px]:inline"
               }`}
             >
-              Ticket<span className="text-[#2457ff]">Me</span>
+              Tiket<span className="text-[#2457ff]">ko</span>
             </span>
           </Link>
 

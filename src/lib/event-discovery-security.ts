@@ -599,7 +599,7 @@ export async function fetchDiscoveryFeed(
           headers: {
             accept:
               "application/atom+xml, application/feed+json, application/json, application/rss+xml, application/xml, text/calendar, text/xml;q=0.9",
-            "user-agent": "TicketMe-EventDiscovery/1.0",
+            "user-agent": "Tiketko-EventDiscovery/1.0",
           },
           redirect: "manual",
           signal: controller.signal,

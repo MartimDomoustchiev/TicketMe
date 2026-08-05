@@ -22,7 +22,7 @@ const wranglerCli = join(
 );
 
 const workerSource = `
-const canonicalOrigin = "https://www.ticketme.store";
+const canonicalOrigin = "https://www.tiketko.top";
 
 export default {
   fetch(request) {

@@ -550,10 +550,10 @@ const EVENT_COPY = {
     sourceLinked: "Данните са свързани с посочения източник",
     officialEventTitle: "Цени и билети от официалния източник",
     officialEventDescription:
-      "TicketMe показва това събитие за откриване и не продава билети за него. Проверете актуалните цени, наличност и условия в официалния източник.",
+      "Tiketko показва това събитие за откриване и не продава билети за него. Проверете актуалните цени, наличност и условия в официалния източник.",
     externalEventTitle: "Цени и билети от източника на събитието",
     externalEventDescription:
-      "TicketMe показва това събитие за откриване и не продава билети за него. Проверете актуалните цени, наличност и условия в посочения външен източник.",
+      "Tiketko показва това събитие за откриване и не продава билети за него. Проверете актуалните цени, наличност и условия в посочения външен източник.",
     salesPausedTitle: "Продажбата е временно поставена на пауза",
     salesPausedDescription:
       "Пазим системата честна и не приемаме поръчки, докато не можем да потвърдим наличността. Опитай отново след малко.",
@@ -564,7 +564,7 @@ const EVENT_COPY = {
     fairQueue: "Честна опашка",
     fairQueueText: "Заявките се обработват по ред",
     testInventory: "Симулационна наличност",
-    testInventoryText: "TicketMe тестови бройки, не официални места",
+    testInventoryText: "Tiketko тестови бройки, не официални места",
     emailTicket: "Билет по имейл",
     emailTicketText: "PDF файл веднага след покупката",
     qrEntry: "QR вход",
@@ -573,7 +573,7 @@ const EVENT_COPY = {
     notValidForEntryText: "Тестовият PDF демонстрира издаването на билет",
     sourceAttribution: "Източник на информацията за събитието",
     sourceAttributionText:
-      "Програмата, мястото и датата са атрибутирани към посочения външен източник. TicketMe Stripe test плащането е отделна симулация и не купува билет от организатора.",
+      "Програмата, мястото и датата са атрибутирани към посочения външен източник. Tiketko Stripe test плащането е отделна симулация и не купува билет от организатора.",
     aboutEvent: "За събитието",
     venueAndTime: "Място и час",
     date: "Дата",
@@ -602,10 +602,10 @@ const EVENT_COPY = {
     sourceLinked: "Details are linked to the attributed source",
     officialEventTitle: "Prices and tickets from the official source",
     officialEventDescription:
-      "TicketMe lists this event for discovery and does not sell its tickets. Check current prices, availability and conditions on the official source.",
+      "Tiketko lists this event for discovery and does not sell its tickets. Check current prices, availability and conditions on the official source.",
     externalEventTitle: "Prices and tickets from the event source",
     externalEventDescription:
-      "TicketMe lists this event for discovery and does not sell its tickets. Check current prices, availability and conditions on the linked external source.",
+      "Tiketko lists this event for discovery and does not sell its tickets. Check current prices, availability and conditions on the linked external source.",
     salesPausedTitle: "Ticket sales are temporarily paused",
     salesPausedDescription:
       "To keep allocation fair, we do not accept orders while live inventory cannot be confirmed. Please try again shortly.",
@@ -616,7 +616,7 @@ const EVENT_COPY = {
     fairQueue: "Fair queue",
     fairQueueText: "Requests are processed in order",
     testInventory: "Simulation inventory",
-    testInventoryText: "TicketMe test counts, not official venue seats",
+    testInventoryText: "Tiketko test counts, not official venue seats",
     emailTicket: "Ticket by email",
     emailTicketText: "PDF delivered immediately after booking",
     qrEntry: "QR admission",
@@ -625,7 +625,7 @@ const EVENT_COPY = {
     notValidForEntryText: "The test PDF demonstrates ticket issuance only",
     sourceAttribution: "Event information source",
     sourceAttributionText:
-      "The programme, venue and date are attributed to the linked external source. TicketMe's Stripe test payment is a separate simulation and does not buy an organizer ticket.",
+      "The programme, venue and date are attributed to the linked external source. Tiketko's Stripe test payment is a separate simulation and does not buy an organizer ticket.",
     aboutEvent: "About the event",
     venueAndTime: "Venue and time",
     date: "Date",

@@ -51,7 +51,7 @@ test("embedded Checkout stays on-site and enables eligible card wallets", () => 
   assert.equal(params.return_url, undefined);
   assert.deepEqual(params.payment_method_types, ["card"]);
   assert.deepEqual(params.branding_settings, {
-    display_name: "TicketMe",
+    display_name: "Tiketko",
     background_color: "#ffffff",
     button_color: "#1d4ed8",
     border_style: "rounded",
@@ -84,7 +84,7 @@ test("first-party sale event produces the configured Checkout amount and metadat
   assert.ok(standard);
 
   const params = buildStripeCheckoutSessionParams({
-    baseUrl: "https://www.ticketme.store",
+    baseUrl: "https://www.tiketko.top",
     event: PRIMARY_SALE_EVENT,
     expiresAtUnix: 1_800_000_000,
     locale: "bg",
@@ -109,7 +109,7 @@ test("external test simulation is unmistakably non-admission in Stripe", () => {
   assert.ok(standard);
 
   const params = buildStripeCheckoutSessionParams({
-    baseUrl: "https://www.ticketme.store",
+    baseUrl: "https://www.tiketko.top",
     event: EVENT,
     expiresAtUnix: 1_800_000_000,
     locale: "en",

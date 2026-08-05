@@ -30,7 +30,7 @@ export default function GlobalError({
         >
           <section>
             <h1>
-              TicketMe is temporarily unavailable / временно не е достъпен
+              Tiketko is temporarily unavailable / временно не е достъпен
             </h1>
             <p>
               Please try loading the page again. / Опитай да заредиш страницата

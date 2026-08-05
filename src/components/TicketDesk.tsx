@@ -53,7 +53,7 @@ type StripeCheckoutSession = {
 const COPY = {
   bg: {
     ticketTypesEyebrow: "Видове билети",
-    testTicketTypesEyebrow: "TicketMe Stripe test оферти",
+    testTicketTypesEyebrow: "Tiketko Stripe test оферти",
     chooseTicket: "Избери своя билет",
     chooseTestTicket: "Избери тестова билетна категория",
     live: "Наличност на живо",
@@ -82,9 +82,9 @@ const COPY = {
     testPayment:
       "Stripe test mode: няма реално таксуване. PDF билетът се изпраща по имейл, но не е валиден за вход на събитието.",
     testInventory:
-      "Цените и наличностите по-долу са симулационни данни на TicketMe, а не официални цени или места от организатора.",
+      "Цените и наличностите по-долу са симулационни данни на Tiketko, а не официални цени или места от организатора.",
     reservationWindow:
-      "При отваряне билетът се резервира през честната опашка, докато завършиш плащането в TicketMe.",
+      "При отваряне билетът се резервира през честната опашка, докато завършиш плащането в Tiketko.",
     cancelCheckout: "Смени билета",
     cancellingCheckout: "Освобождаваме билета…",
     paymentUnavailable:
@@ -113,7 +113,7 @@ const COPY = {
   },
   en: {
     ticketTypesEyebrow: "Ticket types",
-    testTicketTypesEyebrow: "TicketMe Stripe test offers",
+    testTicketTypesEyebrow: "Tiketko Stripe test offers",
     chooseTicket: "Choose your ticket",
     chooseTestTicket: "Choose a test ticket category",
     live: "Live availability",
@@ -142,9 +142,9 @@ const COPY = {
     testPayment:
       "Stripe test mode: no real money is charged. The PDF ticket is emailed to you, but it is not valid for admission to the event.",
     testInventory:
-      "The prices and availability below are TicketMe simulation data, not the organizer's official prices or inventory.",
+      "The prices and availability below are Tiketko simulation data, not the organizer's official prices or inventory.",
     reservationWindow:
-      "Opening checkout reserves the ticket through the fair queue while you pay inside TicketMe.",
+      "Opening checkout reserves the ticket through the fair queue while you pay inside Tiketko.",
     cancelCheckout: "Change ticket",
     cancellingCheckout: "Releasing the ticket…",
     paymentUnavailable:
@@ -208,29 +208,29 @@ const TEST_TICKET_COPY = {
   bg: {
     fan: {
       label: "Тестова фен категория",
-      description: "Симулационна TicketMe категория без право на вход.",
+      description: "Симулационна Tiketko категория без право на вход.",
     },
     standard: {
       label: "Тестова стандартна категория",
-      description: "Симулационна TicketMe категория без право на вход.",
+      description: "Симулационна Tiketko категория без право на вход.",
     },
     premium: {
       label: "Тестова премиум категория",
-      description: "Симулационна TicketMe категория без право на вход.",
+      description: "Симулационна Tiketko категория без право на вход.",
     },
   },
   en: {
     fan: {
       label: "Test fan category",
-      description: "TicketMe simulation category with no venue admission.",
+      description: "Tiketko simulation category with no venue admission.",
     },
     standard: {
       label: "Test standard category",
-      description: "TicketMe simulation category with no venue admission.",
+      description: "Tiketko simulation category with no venue admission.",
     },
     premium: {
       label: "Test premium category",
-      description: "TicketMe simulation category with no venue admission.",
+      description: "Tiketko simulation category with no venue admission.",
     },
   },
 } as const;

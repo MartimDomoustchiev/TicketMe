@@ -40,7 +40,7 @@ export function EventCard({
     Number.POSITIVE_INFINITY,
   );
   const testOfferLabel =
-    locale === "en" ? "TicketMe test offer" : "TicketMe тестова оферта";
+    locale === "en" ? "Tiketko test offer" : "Tiketko тестова оферта";
   const sourceLinkLabel =
     locale === "en" ? "Event source" : "Източник на събитието";
 

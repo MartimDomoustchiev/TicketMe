@@ -488,14 +488,14 @@ function drawBrandMark(
     size: 3.2,
     color: color(design.background),
   });
-  page.drawText("TM", {
+  page.drawText("TK", {
     x: MAIN_LEFT + 6.2,
     y: 312,
     size: 7.4,
     font: semibold,
     color: WHITE,
   });
-  page.drawText("TicketMe", {
+  page.drawText("Tiketko", {
     x: MAIN_LEFT + 38,
     y: 311,
     size: 11.5,
@@ -784,26 +784,26 @@ async function renderTicketPdf(
   pdfDoc.setTitle(`${input.ticket.eventName} | ${input.ticket.id}`, {
     showInWindowTitleBar: true,
   });
-  pdfDoc.setAuthor("TicketMe");
+  pdfDoc.setAuthor("Tiketko");
   pdfDoc.setSubject(
     simulation
-      ? "TicketMe test payment record - not valid for entry"
-      : "Official TicketMe digital admission ticket",
+      ? "Tiketko test payment record - not valid for entry"
+      : "Official Tiketko digital admission ticket",
   );
-  pdfDoc.setCreator("TicketMe");
-  pdfDoc.setProducer("TicketMe PDF service");
+  pdfDoc.setCreator("Tiketko");
+  pdfDoc.setProducer("Tiketko PDF service");
   pdfDoc.setLanguage(locale === "en" ? "en-GB" : "bg-BG");
   pdfDoc.setKeywords(
     simulation
       ? [
-          "TicketMe",
+          "Tiketko",
           "test payment record",
           "not valid for entry",
           "transaction verification",
           design.id,
         ]
       : [
-          "TicketMe",
+          "Tiketko",
           "official event ticket",
           "QR admission",
           design.id,

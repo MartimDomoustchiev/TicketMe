@@ -57,7 +57,7 @@ const COPY = {
     connecting: "Свързване",
     secureVerified: "Сигурно Stripe плащане и потвърден имейл",
     externalSource: "Покупката се завършва при посочения източник",
-    testOffer: "TicketMe Stripe test оферта",
+    testOffer: "Tiketko Stripe test оферта",
     testNotice:
       "Това е тестово плащане без реално таксуване. PDF билетът не е валиден за вход, а наличността не е официалната наличност на организатора.",
     sourceLink: (source: string) => `Източник на събитието: ${source}`,
@@ -82,7 +82,7 @@ const COPY = {
     connecting: "Connecting",
     secureVerified: "Secure Stripe checkout and verified email",
     externalSource: "Purchase is completed with the attributed source",
-    testOffer: "TicketMe Stripe test offer",
+    testOffer: "Tiketko Stripe test offer",
     testNotice:
       "This is a test payment with no real charge. The PDF ticket is not valid for venue entry, and these counts are not the organizer's official inventory.",
     sourceLink: (source: string) => `Event source: ${source}`,

@@ -335,7 +335,7 @@ export default async function Home() {
           <div className="absolute inset-0 bg-[radial-gradient(circle_at_78%_18%,rgba(36,87,255,0.4),transparent_32%),radial-gradient(circle_at_14%_90%,rgba(255,107,53,0.2),transparent_28%)]" />
           <div className="relative mx-auto max-w-7xl">
             <p className="text-xs font-black uppercase tracking-[0.16em] text-blue-300">
-              TicketMe
+              Tiketko
             </p>
             <h1 className="mt-4 max-w-3xl text-5xl font-black leading-[1.02] tracking-[-0.05em] sm:text-7xl">
               {copy.emptyHeroTitle}
@@ -586,10 +586,10 @@ const HOME_COPY = {
     chooseTickets: "Купи билет",
     testPayment: "Тестово Stripe плащане",
     testPaymentText:
-      "Без реално таксуване. Цените и бройките са TicketMe симулация, а PDF билетът не важи за вход.",
+      "Без реално таксуване. Цените и бройките са Tiketko симулация, а PDF билетът не важи за вход.",
     moreInformation: "Повече информация",
     ticketsFrom: "Билети от",
-    testOffersFrom: "TicketMe тестови оферти от",
+    testOffersFrom: "Tiketko тестови оферти от",
     eventSource: "Източник",
     officialListing: "Официален източник",
     sourceListing: "Източник на събитието",
@@ -623,7 +623,7 @@ const HOME_COPY = {
     confidenceEyebrow: "Прозрачност по дизайн",
     confidenceTitle: "Знаеш откъде идва всяка обява",
     confidenceText:
-      "TicketMe показва отделно източника на събитието, организаторските билети и ясно означените Stripe test симулации.",
+      "Tiketko показва отделно източника на събитието, организаторските билети и ясно означените Stripe test симулации.",
     secureRequest: "Ясно посочен източник",
     secureRequestText:
       "Всяка външна обява води до атрибутирания източник на събитието.",
@@ -645,10 +645,10 @@ const HOME_COPY = {
     chooseTickets: "Buy ticket",
     testPayment: "Test Stripe payment",
     testPaymentText:
-      "No real charge. Prices and counts are a TicketMe simulation, and the PDF ticket is not valid for venue entry.",
+      "No real charge. Prices and counts are a Tiketko simulation, and the PDF ticket is not valid for venue entry.",
     moreInformation: "More information",
     ticketsFrom: "Tickets from",
-    testOffersFrom: "TicketMe test offers from",
+    testOffersFrom: "Tiketko test offers from",
     eventSource: "Source",
     officialListing: "Official source",
     sourceListing: "Event source",
@@ -683,7 +683,7 @@ const HOME_COPY = {
     confidenceEyebrow: "Transparency by design",
     confidenceTitle: "Know where every listing comes from",
     confidenceText:
-      "TicketMe separately identifies the event source, organizer admission tickets and clearly labelled Stripe test simulations.",
+      "Tiketko separately identifies the event source, organizer admission tickets and clearly labelled Stripe test simulations.",
     secureRequest: "Clearly attributed sources",
     secureRequestText:
       "Every external listing links to its attributed event source.",

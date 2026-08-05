@@ -18,7 +18,7 @@ function stableVisualSeed(value: string): number {
 
 /**
  * Gives every listing a deterministic art direction while the underlying
- * photography stays within TicketMe's owned, category-matched asset library.
+ * photography stays within Tiketko's owned, category-matched asset library.
  * The treatment is deliberately subtle so artist photography is never
  * fabricated or confused with official event artwork.
  */

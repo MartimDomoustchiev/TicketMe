@@ -83,7 +83,7 @@ export default async function CheckInPage({
             {(status === "test-ticket" ||
               (ticket && secretMatches && testSimulation)) && (
               <StatusBox tone="info" icon={<ShieldCheck size={20} />}>
-                QR кодът потвърждава TicketMe Stripe тестова покупка. Този
+                QR кодът потвърждава Tiketko Stripe тестова покупка. Този
                 PDF не е валиден за вход в събитието и не може да бъде
                 маркиран като използван.
               </StatusBox>

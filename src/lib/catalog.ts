@@ -196,7 +196,7 @@ function mapDiscoveredEvent(record: CatalogEventRecord): CatalogEvent {
     : 0;
   const currency = "EUR" as CurrencyCode;
   // Discovery artwork is source metadata, not automatically licensed for
-  // republication. Render TicketMe-owned category art until an organizer
+  // republication. Render Tiketko-owned category art until an organizer
   // supplies an approved, durably stored asset with explicit usage rights.
   const image = getCategoryImage(category);
   const sourceName =

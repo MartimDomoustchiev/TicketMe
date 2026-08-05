@@ -77,7 +77,7 @@ export function getStripeClient(): Stripe {
 
   stripeClient ??= new Stripe(secretKey, {
     appInfo: {
-      name: "TicketMe",
+      name: "Tiketko",
       version: "0.1.0",
     },
     maxNetworkRetries: 2,

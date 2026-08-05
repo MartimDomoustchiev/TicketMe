@@ -570,7 +570,7 @@ const FEATURED_TICKET_TYPES: readonly TicketType[] = [
 ];
 
 /**
- * First-party inventory used by the complete TicketMe checkout flow.
+ * First-party inventory used by the complete Tiketko checkout flow.
  *
  * This organizer-owned event issues admission tickets. Attributed third-party
  * listings keep their external sale mode and source facts, while exposing a
@@ -579,11 +579,11 @@ const FEATURED_TICKET_TYPES: readonly TicketType[] = [
 export const PRIMARY_SALE_EVENT: CatalogEvent = {
   id: "ticketme-live-next-wave-2027",
   slug: "ticketme-live-next-wave-2027",
-  title: "TicketMe Live: The Next Wave",
-  name: "TicketMe Live: The Next Wave",
+  title: "Tiketko Live: The Next Wave",
+  name: "Tiketko Live: The Next Wave",
   tagline: "Нова българска музика, визуални изкуства и една незабравима вечер.",
   description:
-    "TicketMe Live: The Next Wave е оригинално събитие на TicketMe, което събира изгряващи български артисти, аудио-визуални пърформанси и специални гости на една сцена. Всеки билет е персонален, издава се след потвърдено плащане и включва защитен QR код за еднократен вход.",
+    "Tiketko Live: The Next Wave е оригинално събитие на Tiketko, което събира изгряващи български артисти, аудио-визуални пърформанси и специални гости на една сцена. Всеки билет е персонален, издава се след потвърдено плащане и включва защитен QR код за еднократен вход.",
   category: "Concerts",
   city: "София",
   venue: "John Atanasoff Forum",
@@ -629,9 +629,9 @@ export const PRIMARY_SALE_EVENT: CatalogEvent = {
       description: "Приоритетен вход, премиум зона и гардероб.",
     },
   ],
-  sourceName: "TicketMe",
+  sourceName: "Tiketko",
   sourceUrl:
-    "https://www.ticketme.store/events/ticketme-live-next-wave-2027",
+    "https://www.tiketko.top/events/ticketme-live-next-wave-2027",
   checkoutMode: "admission",
   saleMode: "internal",
   sourceOfficial: true,

@@ -21,14 +21,14 @@ test("safeReturnPath permits local destinations and rejects open redirects", () 
 });
 
 test("production base URLs require a public HTTPS origin", () => {
-  assert.equal(isPublicHttpsBaseUrl("https://ticketme.store"), true);
-  assert.equal(isPublicHttpsBaseUrl("https://app.ticketme.store/"), true);
-  assert.equal(isPublicHttpsBaseUrl("http://ticketme.store"), false);
+  assert.equal(isPublicHttpsBaseUrl("https://tiketko.top"), true);
+  assert.equal(isPublicHttpsBaseUrl("https://app.tiketko.top/"), true);
+  assert.equal(isPublicHttpsBaseUrl("http://tiketko.top"), false);
   assert.equal(isPublicHttpsBaseUrl("http://localhost:3000"), false);
   assert.equal(isPublicHttpsBaseUrl("https://127.0.0.1"), false);
   assert.equal(isPublicHttpsBaseUrl("https://192.168.1.25"), false);
   assert.equal(
-    isPublicHttpsBaseUrl("https://user:password@ticketme.store"),
+    isPublicHttpsBaseUrl("https://user:password@tiketko.top"),
     false,
   );
   assert.equal(isPublicHttpsBaseUrl("not a URL"), false);
@@ -38,9 +38,9 @@ test("public base URL falls back to Vercel production domains", () => {
   assert.equal(
     resolvePublicBaseUrl({
       NEXT_PUBLIC_APP_URL: "http://localhost:3000",
-      VERCEL_PROJECT_PRODUCTION_URL: "www.ticketme.store",
+      VERCEL_PROJECT_PRODUCTION_URL: "www.tiketko.top",
     }),
-    "https://www.ticketme.store",
+    "https://www.tiketko.top",
   );
   assert.equal(
     resolvePublicBaseUrl({
@@ -50,10 +50,10 @@ test("public base URL falls back to Vercel production domains", () => {
   );
   assert.equal(
     resolvePublicBaseUrl({
-      NEXT_PUBLIC_APP_URL: "https://ticketme.store/",
-      VERCEL_PROJECT_PRODUCTION_URL: "www.ticketme.store",
+      NEXT_PUBLIC_APP_URL: "https://tiketko.top/",
+      VERCEL_PROJECT_PRODUCTION_URL: "www.tiketko.top",
     }),
-    "https://ticketme.store",
+    "https://tiketko.top",
   );
 });
 

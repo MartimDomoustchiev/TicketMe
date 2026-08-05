@@ -1,7 +1,7 @@
-# TicketMe event artwork
+# Tiketko event artwork
 
 The nine category/hero masters in this directory are original synthetic
-artwork created specifically for TicketMe. They contain no event logos,
+artwork created specifically for Tiketko. They contain no event logos,
 artist likenesses, trademarks, or third-party promotional photography.
 
 `listings/` contains deterministic derivatives generated with:

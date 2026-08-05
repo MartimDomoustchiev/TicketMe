@@ -15,8 +15,8 @@ export async function generateMetadata(): Promise<Metadata> {
   const english = locale === "en";
   const canonicalPath = publicUrl.split(/[?#]/)[0] || `/${locale}`;
   const title = english
-    ? "TicketMe | Tickets for events"
-    : "TicketMe | Билети за събития";
+    ? "Tiketko | Tickets for events"
+    : "Tiketko | Билети за събития";
   const description = english
     ? "Discover upcoming concerts, festivals, theatre and experiences across Bulgaria, with clearly attributed event sources."
     : "Открий предстоящи концерти, фестивали, театър и преживявания в България с ясно посочени източници.";
@@ -25,10 +25,10 @@ export async function generateMetadata(): Promise<Metadata> {
     metadataBase: new URL(getBaseUrl()),
     title: {
       default: title,
-      template: "%s | TicketMe",
+      template: "%s | Tiketko",
     },
     description,
-    applicationName: "TicketMe",
+    applicationName: "Tiketko",
     icons: {
       icon: "/icon.svg",
     },
@@ -58,7 +58,7 @@ export async function generateMetadata(): Promise<Metadata> {
       type: "website",
       locale: english ? "en_GB" : "bg_BG",
       alternateLocale: [english ? "bg_BG" : "en_GB"],
-      siteName: "TicketMe",
+      siteName: "Tiketko",
       title,
       description,
       images: [
@@ -66,7 +66,7 @@ export async function generateMetadata(): Promise<Metadata> {
           url: "/events/concerts.webp",
           width: 1600,
           height: 800,
-          alt: "TicketMe events in Bulgaria",
+          alt: "Tiketko events in Bulgaria",
         },
       ],
     },

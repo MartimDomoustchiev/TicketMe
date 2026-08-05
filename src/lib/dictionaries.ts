@@ -4,7 +4,7 @@ const bg = {
   header: {
     location: "Събития в цяла България",
     benefits: "Сигурни билети · Потвърден имейл · Бързо изтегляне",
-    homeAria: "TicketMe — начална страница",
+    homeAria: "Tiketko — начална страница",
     searchLabel: "Търси събитие, артист или място",
     searchPlaceholder: "Търси събитие, артист или място",
     allEvents: "Всички събития",
@@ -65,7 +65,7 @@ const en: Dictionary = {
   header: {
     location: "Events across Bulgaria",
     benefits: "Secure tickets · Verified email · Instant download",
-    homeAria: "TicketMe — home",
+    homeAria: "Tiketko — home",
     searchLabel: "Search by event, artist or venue",
     searchPlaceholder: "Search by event, artist or venue",
     allEvents: "All events",

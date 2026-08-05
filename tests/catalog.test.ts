@@ -127,7 +127,7 @@ test("first-party event exposes explicit organizer inventory for Checkout", () =
 
   assert.equal(PRIMARY_SALE_EVENT.saleMode, "internal");
   assert.equal(PRIMARY_SALE_EVENT.checkoutMode, "admission");
-  assert.equal(PRIMARY_SALE_EVENT.sourceName, "TicketMe");
+  assert.equal(PRIMARY_SALE_EVENT.sourceName, "Tiketko");
   assert.equal(PRIMARY_SALE_EVENT.sourceOfficial, true);
   assert.equal(PRIMARY_SALE_EVENT.priceAvailable, true);
   assert.equal(PRIMARY_SALE_EVENT.currency, "EUR");
