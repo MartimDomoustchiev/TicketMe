@@ -264,6 +264,59 @@ test("RSS and Atom parsers keep only strict event facts", () => {
   assert.equal(atomEvents[0].title, "Modern Art");
 });
 
+test("feed text decoding is single-pass and markup parsing is quote-aware", () => {
+  const body = JSON.stringify({
+    events: [
+      {
+        id: "markup-regression",
+        name: "Markup Regression",
+        startDate: "2027-08-01T10:00:00Z",
+        venue: "Hall One",
+        city: "Sofia",
+        description:
+          "Before &amp; safe &constructor; &lt;b&gt;bold&lt;/b&gt; " +
+          "&amp;lt;em&amp;gt;literal&amp;lt;/em&amp;gt; " +
+          '<ScRiPt data-boundary=">">hidden</ScRiPt > ' +
+          "<style media='screen > print'>also hidden</style > " +
+          "<script/x>odd hidden</script > " +
+          "<strong>After</strong> &#x41;&#65;",
+      },
+      {
+        id: "unclosed-script",
+        name: "Unclosed Script",
+        startDate: "2027-08-02T10:00:00Z",
+        venue: "Hall Two",
+        city: "Sofia",
+        description: "Visible<script data-boundary='>'>hidden forever",
+      },
+      {
+        id: "bounded-malformed-markup",
+        name: "Bounded Malformed Markup",
+        startDate: "2027-08-03T10:00:00Z",
+        venue: "Hall Three",
+        city: "Sofia",
+        description:
+          "Visible " +
+          "&unterminated".repeat(2_000) +
+          "<tag".repeat(2_000),
+      },
+    ],
+  });
+
+  const events = parseDiscoveryFeed(body, {
+    feedUrl: "https://feeds.example.com/events.json",
+    contentType: "application/json",
+  });
+
+  assert.equal(events.length, 3);
+  assert.equal(
+    events[0].description,
+    "Before & safe &constructor; bold &lt;em&gt;literal&lt;/em&gt; After AA",
+  );
+  assert.equal(events[1].description, "Visible");
+  assert.ok(events[2].description?.startsWith("Visible &unterminated"));
+});
+
 test("JSON source links require the feed host or an explicit host rule", () => {
   const body = JSON.stringify({
     name: "Partner events",

@@ -108,7 +108,8 @@ scanning** и **Security -> Secret scanning**. „Enabled“ без поне е�
    - **Restrict deletions**;
    - **Block force pushes**;
    - **Require a pull request before merging**;
-   - поне 1 approval за промени по auth, payment, database и deployment;
+   - поне 1 approval за промени по auth, payment, database и deployment, когато
+     има втори доверен maintainer;
    - **Dismiss stale approvals** и **Require conversation resolution**;
    - **Require status checks to pass**;
    - **Require branches to be up to date** преди merge.
@@ -116,6 +117,11 @@ scanning** и **Security -> Secret scanning**. „Enabled“ без поне е�
    `validate` от CI и JavaScript/TypeScript анализа от CodeQL.
 6. По желание включи linear history и signed commits, но първо провери, че
    всички maintainers могат да подписват commits без да заобикалят ruleset-а.
+
+При solo repository остави required approvals на `0`, но запази изискването за
+pull request и успешни checks. Авторът не може да одобри собствения си pull
+request и стойност `1` би блокирала проекта без втори доверен maintainer. След
+добавянето на такъв maintainer увеличи изискването на поне `1`.
 
 Ако Rulesets не са достъпни, използвай **Settings -> Branches -> Branch
 protection rules** със същите ограничения.
