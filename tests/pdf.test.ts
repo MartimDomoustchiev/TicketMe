@@ -28,6 +28,7 @@ function testTicket(overrides: Partial<StoredTicket> = {}): StoredTicket {
     qrSecret: "test-secret",
     status: "issued",
     ...overrides,
+    purchaseSnapshot: overrides.purchaseSnapshot ?? null,
   };
 }
 

@@ -215,6 +215,41 @@ test("session form outcomes use 303 so credentials are never reposted", async ()
   assert.equal(location.searchParams.get("next"), "/en/events");
 });
 
+test("session rejects oversized and unsupported form bodies", async () => {
+  const oversized = await sessionPost(
+    new Request("https://tickets.example/api/session", {
+      method: "POST",
+      headers: {
+        "content-length": String(16 * 1024 + 1),
+        "content-type": "application/x-www-form-urlencoded",
+        host: "tickets.example",
+        origin: "https://tickets.example",
+        "sec-fetch-site": "same-origin",
+      },
+      body: "intent=login",
+    }),
+  );
+  assert.equal(oversized.status, 413);
+  assert.deepEqual(await oversized.json(), { error: "payload-too-large" });
+
+  const unsupported = await sessionPost(
+    new Request("https://tickets.example/api/session", {
+      method: "POST",
+      headers: {
+        "content-type": "text/plain",
+        host: "tickets.example",
+        origin: "https://tickets.example",
+        "sec-fetch-site": "same-origin",
+      },
+      body: "intent=login",
+    }),
+  );
+  assert.equal(unsupported.status, 415);
+  assert.deepEqual(await unsupported.json(), {
+    error: "unsupported-media-type",
+  });
+});
+
 test("database outages use a dedicated account-service error", async () => {
   const keys = [
     "NODE_ENV",
@@ -349,9 +384,9 @@ test("verification GET only opens the confirmation screen", () => {
   assert.equal(location.searchParams.get("next"), "/en/events");
 });
 
-test("the in-process limiter opportunistically bounds its memory", () => {
+test("the in-process limiter opportunistically bounds its memory", async () => {
   for (let index = 0; index < 5_250; index += 1) {
-    consumeRateLimit({
+    await consumeRateLimit({
       key: `bounded-map-test:${index}`,
       limit: 1,
       windowMs: 60 * 60_000,

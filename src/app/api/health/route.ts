@@ -4,21 +4,27 @@ import {
 } from "@/lib/database";
 import { isEmailReadyForArbitraryRecipients } from "@/lib/email";
 import { resolvePublicBaseUrl } from "@/lib/site";
-import {
-  isStripeEmbeddedConfigured,
-  isStripeWebhookConfigured,
-  stripeMode,
-  stripePublishableMode,
-} from "@/lib/stripe";
+import { isStripeEmbeddedConfigured } from "@/lib/stripe";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-export async function GET() {
+const READINESS_CACHE_TTL_MS = 30_000;
+
+type HealthReadiness = {
+  ready: boolean;
+};
+
+let cachedReadiness:
+  | {
+      expiresAt: number;
+      promise: Promise<HealthReadiness>;
+    }
+  | undefined;
+
+async function probeReadiness(): Promise<HealthReadiness> {
   const postgresConfigured = isDatabaseConfigured();
   const development = process.env.NODE_ENV !== "production";
-  const configuredStripeMode = stripeMode();
-  const configuredPublishableMode = stripePublishableMode();
   const stripeEmbedded = isStripeEmbeddedConfigured();
   const requiredChecks = {
     database: postgresConfigured || development,
@@ -34,7 +40,6 @@ export async function GET() {
     publicUrl: Boolean(resolvePublicBaseUrl()) || development,
     stripe: stripeEmbedded || development,
   };
-  const stripeWebhook = isStripeWebhookConfigured();
 
   let databaseReachable = development;
   let databaseSchemaReady = development;
@@ -58,29 +63,34 @@ export async function GET() {
     databaseTlsReady &&
     Object.values(requiredChecks).every((check) => check);
 
+  return { ready };
+}
+
+function readiness(): Promise<HealthReadiness> {
+  const now = Date.now();
+  if (cachedReadiness && cachedReadiness.expiresAt > now) {
+    return cachedReadiness.promise;
+  }
+
+  const promise = probeReadiness();
+  cachedReadiness = {
+    expiresAt: now + READINESS_CACHE_TTL_MS,
+    promise,
+  };
+  void promise.catch(() => {
+    if (cachedReadiness?.promise === promise) {
+      cachedReadiness = undefined;
+    }
+  });
+  return promise;
+}
+
+export async function GET() {
+  const { ready } = await readiness();
+
   return Response.json(
     {
       status: ready ? "ready" : "degraded",
-      paymentMode: stripeEmbedded && configuredStripeMode
-        ? `stripe-embedded-${configuredStripeMode}`
-        : "unavailable",
-      fulfillmentMode: stripeWebhook
-        ? "stripe-webhook-and-success-return"
-        : "stripe-success-return-and-reconciliation",
-      checks: {
-        ...requiredChecks,
-        stripeSecretKey: configuredStripeMode !== null,
-        stripePublishableKey: configuredPublishableMode !== null,
-        stripeKeyModesMatch:
-          configuredStripeMode !== null &&
-          configuredStripeMode === configuredPublishableMode,
-        stripeWebhook,
-        databaseReachable,
-        databaseSchemaReady,
-        databaseTls,
-        databaseTlsReady,
-      },
-      timestamp: new Date().toISOString(),
     },
     {
       status: ready ? 200 : 503,

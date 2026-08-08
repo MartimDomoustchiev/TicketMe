@@ -352,6 +352,7 @@ export async function databaseSchemaStatus(
       to_regclass('public.catalog_events') IS NOT NULL AS catalog_events,
       to_regclass('public.catalog_event_sources') IS NOT NULL AS catalog_event_sources,
       to_regclass('public.event_discovery_runs') IS NOT NULL AS event_discovery_runs,
+      to_regclass('public.request_rate_limits') IS NOT NULL AS request_rate_limits,
       COALESCE(
         (SELECT ssl FROM pg_stat_ssl WHERE pid = pg_backend_pid()),
         FALSE
@@ -371,7 +372,8 @@ export async function databaseSchemaStatus(
       row.email_verification_tokens &&
       row.catalog_events &&
       row.catalog_event_sources &&
-      row.event_discovery_runs,
+      row.event_discovery_runs &&
+      row.request_rate_limits,
   );
 
   return { ready, tls: Boolean(row?.tls) };

@@ -5,7 +5,7 @@ import path from "node:path";
 import test from "node:test";
 import { PRIMARY_SALE_EVENT } from "../src/lib/event";
 
-test("delivery retries include pending and expired claims in oldest-first order", async () => {
+test("delivery retries prefer fewer attempts, then oldest-first order", async () => {
   const originalCwd = process.cwd();
   const isolatedCwd = await mkdtemp(
     path.join(tmpdir(), "ticketme-delivery-retry-test-"),
@@ -36,6 +36,11 @@ test("delivery retries include pending and expired claims in oldest-first order"
         qrSecret: `retry-secret-${suffix}`,
       });
       assert.ok(fulfillment);
+      assert.ok(reservation.purchaseSnapshot);
+      assert.deepEqual(
+        fulfillment.ticket.purchaseSnapshot,
+        reservation.purchaseSnapshot,
+      );
       return fulfillment.reservation;
     };
 
@@ -76,6 +81,43 @@ test("delivery retries include pending and expired claims in oldest-first order"
     assert.deepEqual(
       expiredClaim.map((reservation) => reservation.id),
       [first.id],
+    );
+
+    const poisonReservations = [];
+    for (let index = 0; index < 20; index += 1) {
+      const poison = await createPendingDelivery(
+        `retry-poison-${index}@example.com`,
+        `poison-${index}`,
+      );
+      const poisonClaim = await store.claimTicketDelivery({
+        reservationId: poison.id,
+      });
+      assert.ok(poisonClaim);
+      assert.equal(
+        await store.releaseTicketDelivery({
+          reservationId: poison.id,
+          claimToken: poisonClaim.claimToken,
+        }),
+        true,
+      );
+      poisonReservations.push(poison.id);
+    }
+
+    const fresh = await createPendingDelivery(
+      "retry-fresh@example.com",
+      "fresh",
+    );
+    const fairBatch = await store.listTicketDeliveriesForRetry(20);
+    assert.equal(fairBatch.length, 20);
+    assert.equal(fairBatch[0]?.id, fresh.id);
+    assert.equal(fairBatch[0]?.deliveryAttempts, 0);
+    assert.ok(fairBatch.slice(1).every((item) => item.deliveryAttempts === 1));
+    assert.ok(
+      poisonReservations.some(
+        (reservationId) =>
+          !fairBatch.some((candidate) => candidate.id === reservationId),
+      ),
+      "The retry limit should omit a poison delivery, never the fresh ticket.",
     );
   } finally {
     process.chdir(originalCwd);

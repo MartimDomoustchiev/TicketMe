@@ -23,6 +23,7 @@ import {
   type EmailDelivery,
 } from "@/lib/email";
 import { consumeRateLimit, requestIdentity } from "@/lib/rate-limit";
+import { readUrlEncodedBodyWithinLimit } from "@/lib/request-body";
 import { isSameOriginRequest } from "@/lib/request-security";
 import { getBaseUrl, safeReturnPath } from "@/lib/site";
 
@@ -31,10 +32,11 @@ export const dynamic = "force-dynamic";
 
 type Locale = "bg" | "en";
 type AuthMode = "login" | "signup";
+const MAX_AUTH_BODY_BYTES = 16 * 1024;
 
 function localeFromRequest(
   request: Request,
-  requestedLocale: FormDataEntryValue | null,
+  requestedLocale: string | null,
   next: string,
 ): Locale {
   if (requestedLocale === "en" || requestedLocale === "bg") {
@@ -108,7 +110,7 @@ function seeOther(request: Request, destination: string): Response {
   });
 }
 
-function rateLimitFor(
+async function rateLimitFor(
   request: Request,
   intent: string,
   email: string,
@@ -116,22 +118,32 @@ function rateLimitFor(
   ipLimit: number,
 ) {
   const identity = requestIdentity(request);
-  const perIp = consumeRateLimit({
-    key: `auth:${intent}:ip:${identity}`,
-    limit: ipLimit,
-    windowMs: 15 * 60_000,
-  });
-  const perIdentity = consumeRateLimit({
-    key: `auth:${intent}:identity:${identity}:${email || "anonymous"}`,
-    limit: identityLimit,
-    windowMs: 15 * 60_000,
-  });
+  const [perIp, perIdentity, perAccount] = await Promise.all([
+    consumeRateLimit({
+      key: `auth:${intent}:ip:${identity}`,
+      limit: ipLimit,
+      windowMs: 15 * 60_000,
+    }),
+    consumeRateLimit({
+      key: `auth:${intent}:identity:${identity}:${email || "anonymous"}`,
+      limit: identityLimit,
+      windowMs: 15 * 60_000,
+    }),
+    consumeRateLimit({
+      key: `auth:${intent}:account:${email || "anonymous"}`,
+      limit: identityLimit,
+      windowMs: 15 * 60_000,
+    }),
+  ]);
   return {
-    allowed: perIp.allowed && perIdentity.allowed,
+    allowed: perIp.allowed && perIdentity.allowed && perAccount.allowed,
     retryAfterSeconds: Math.max(
       perIp.retryAfterSeconds,
       perIdentity.retryAfterSeconds,
+      perAccount.retryAfterSeconds,
     ),
+    unavailable:
+      perIp.unavailable || perIdentity.unavailable || perAccount.unavailable,
   };
 }
 
@@ -172,7 +184,7 @@ function localVerificationHref(verificationHref: string): string {
 
 async function handleSignup(input: {
   request: Request;
-  formData: FormData;
+  formData: URLSearchParams;
   locale: Locale;
   next: string;
 }): Promise<Response> {
@@ -188,15 +200,24 @@ async function handleSignup(input: {
     next: input.next,
   };
 
-  if (
-    !rateLimitFor(
+  const signupLimit = await rateLimitFor(
+    input.request,
+    "signup",
+    email.slice(0, 254),
+    5,
+    12,
+  );
+  if (signupLimit.unavailable) {
+    return redirectWithError(
       input.request,
+      input.locale,
       "signup",
-      email.slice(0, 254),
-      5,
-      12,
-    ).allowed
-  ) {
+      input.next,
+      "service-unavailable",
+      email,
+    );
+  }
+  if (!signupLimit.allowed) {
     return redirectWithError(
       input.request,
       input.locale,
@@ -353,22 +374,31 @@ async function handleSignup(input: {
 
 async function handleLogin(input: {
   request: Request;
-  formData: FormData;
+  formData: URLSearchParams;
   locale: Locale;
   next: string;
 }): Promise<Response> {
   const email = normalizeEmail(String(input.formData.get("email") ?? ""));
   const password = String(input.formData.get("password") ?? "");
 
-  if (
-    !rateLimitFor(
+  const loginLimit = await rateLimitFor(
+    input.request,
+    "login",
+    email.slice(0, 254),
+    8,
+    30,
+  );
+  if (loginLimit.unavailable) {
+    return redirectWithError(
       input.request,
+      input.locale,
       "login",
-      email.slice(0, 254),
-      8,
-      30,
-    ).allowed
-  ) {
+      input.next,
+      "service-unavailable",
+      email,
+    );
+  }
+  if (!loginLimit.allowed) {
     return redirectWithError(
       input.request,
       input.locale,
@@ -461,7 +491,7 @@ async function handleLogin(input: {
 
 async function handleResend(input: {
   request: Request;
-  formData: FormData;
+  formData: URLSearchParams;
   locale: Locale;
   next: string;
 }): Promise<Response> {
@@ -475,7 +505,24 @@ async function handleResend(input: {
       "email",
     );
   }
-  if (!rateLimitFor(input.request, "resend", email, 5, 15).allowed) {
+  const resendLimit = await rateLimitFor(
+    input.request,
+    "resend",
+    email,
+    5,
+    15,
+  );
+  if (resendLimit.unavailable) {
+    return redirectWithError(
+      input.request,
+      input.locale,
+      "login",
+      input.next,
+      "service-unavailable",
+      email,
+    );
+  }
+  if (!resendLimit.allowed) {
     return redirectWithError(
       input.request,
       input.locale,
@@ -557,12 +604,20 @@ export async function POST(request: Request) {
     );
   }
 
-  let formData: FormData;
-  try {
-    formData = await request.formData();
-  } catch {
-    return seeOther(request, "/bg/login?mode=login&error=generic");
+  const parsedBody = await readUrlEncodedBodyWithinLimit(
+    request,
+    MAX_AUTH_BODY_BYTES,
+  );
+  if (!parsedBody.ok) {
+    return Response.json(
+      { error: parsedBody.error },
+      {
+        status: parsedBody.status,
+        headers: { "Cache-Control": "no-store" },
+      },
+    );
   }
+  const formData = parsedBody.value;
 
   const rawNext = safeReturnPath(
     String(formData.get("next") ?? ""),

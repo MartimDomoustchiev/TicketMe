@@ -2,8 +2,8 @@ import "server-only";
 
 import { randomBytes } from "crypto";
 import type Stripe from "stripe";
+import { checkoutPurchaseSnapshotsEqual } from "@/lib/checkout-purchase-snapshot";
 import { sendTicketEmail } from "@/lib/email";
-import { getEventById } from "@/lib/event";
 import { createTicketPdf } from "@/lib/pdf";
 import {
   attachCheckoutSession,
@@ -20,7 +20,7 @@ import {
   type StoredTicket,
 } from "@/lib/store";
 import { getStripeClient } from "@/lib/stripe";
-import { assertStripeCheckoutOfferSafety } from "@/lib/stripe-offer-safety";
+import { assertStripeCheckoutPurchaseSnapshot } from "@/lib/stripe-offer-safety";
 import { readTicketPdf, storeTicketPdf } from "@/lib/storage";
 
 export type CheckoutDeliveryResult = {
@@ -102,34 +102,7 @@ export async function recordPaidCheckout(
     throw new Error("CHECKOUT_RESERVATION_NOT_FOUND");
   }
 
-  const event = getEventById(reservation.eventId);
-  const ticketType = event?.ticketTypes.find(
-    (candidate) => candidate.id === reservation.ticketType,
-  );
-
-  if (!event || !ticketType) {
-    throw new Error("CHECKOUT_EVENT_NOT_FOUND");
-  }
-
-  assertStripeCheckoutOfferSafety(session, event);
-
-  if (
-    (session.metadata?.eventId &&
-      session.metadata.eventId !== reservation.eventId) ||
-    (session.metadata?.ticketType &&
-      session.metadata.ticketType !== reservation.ticketType)
-  ) {
-    throw new Error("CHECKOUT_METADATA_MISMATCH");
-  }
-
-  const expectedAmount = Math.round(ticketType.price * 100);
-  if (
-    event.currency !== ticketType.currency ||
-    session.amount_total !== expectedAmount ||
-    session.currency?.toLowerCase() !== ticketType.currency.toLowerCase()
-  ) {
-    throw new Error("CHECKOUT_AMOUNT_MISMATCH");
-  }
+  assertStripeCheckoutPurchaseSnapshot(session, reservation);
 
   const result = await fulfillCheckoutReservation({
     reservationId,
@@ -174,19 +147,27 @@ export async function deliverCheckoutTicket(
   }
 
   try {
-    const event = getEventById(claim.ticket.eventId);
-    const ticketType = event?.ticketTypes.find(
-      (candidate) => candidate.id === claim.ticket.ticketType,
-    );
+    const purchaseSnapshot = claim.reservation.purchaseSnapshot;
+    const ticketSnapshot = claim.ticket.purchaseSnapshot;
+    if (!purchaseSnapshot || !ticketSnapshot) {
+      throw new Error("CHECKOUT_PURCHASE_SNAPSHOT_MISSING");
+    }
+    if (!checkoutPurchaseSnapshotsEqual(purchaseSnapshot, ticketSnapshot)) {
+      throw new Error("CHECKOUT_PURCHASE_SNAPSHOT_MISMATCH");
+    }
     const ticketPresentation = {
-      offerKind: event?.checkoutMode,
-      sourceName: event?.sourceName,
-      sourceUrl: event?.sourceUrl,
-      ticketLabel: ticketType?.label,
-      unitAmountMinor: ticketType
-        ? Math.round(ticketType.price * 100)
-        : undefined,
-      currency: ticketType?.currency,
+      offerKind: purchaseSnapshot.offerKind,
+      sourceName: purchaseSnapshot.sourceName,
+      sourceUrl: purchaseSnapshot.sourceUrl,
+      ticketLabel: purchaseSnapshot.ticketLabel,
+      unitAmountMinor: purchaseSnapshot.unitAmountMinor,
+      currency: purchaseSnapshot.currency,
+    };
+    const presentationTicket = {
+      ...claim.ticket,
+      eventName: purchaseSnapshot.eventName,
+      eventDate: purchaseSnapshot.eventDate,
+      venue: purchaseSnapshot.venue,
     };
     const verificationUrl = `${baseUrl}/api/tickets/${claim.ticket.id}/verify?secret=${claim.ticket.qrSecret}`;
     let pdf =
@@ -199,7 +180,7 @@ export async function deliverCheckoutTicket(
 
     if (!pdf) {
       pdf = await createTicketPdf({
-        ticket: claim.ticket,
+        ticket: presentationTicket,
         verificationUrl,
         locale: claim.reservation.locale,
         ...ticketPresentation,
@@ -235,7 +216,7 @@ export async function deliverCheckoutTicket(
       to: claim.ticket.buyerEmail,
       name: claim.ticket.buyerName,
       ticketId: claim.ticket.id,
-      eventName: claim.ticket.eventName,
+      eventName: purchaseSnapshot.eventName,
       downloadUrl: storage.storageUrl,
       pdf,
       locale: claim.reservation.locale,

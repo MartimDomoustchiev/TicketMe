@@ -1,5 +1,6 @@
 import { getBuyerSession } from "@/lib/auth";
 import { consumeRateLimit, requestIdentity } from "@/lib/rate-limit";
+import { readJsonBodyWithinLimit } from "@/lib/request-body";
 import { isSameOriginRequest } from "@/lib/request-security";
 import {
   cancelCheckoutReservation,
@@ -9,17 +10,27 @@ import { getStripeClient, isStripeConfigured } from "@/lib/stripe";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+const MAX_CANCEL_BODY_BYTES = 8 * 1024;
 
 type CancelBody = {
   reservationId?: unknown;
 };
 
 export async function POST(request: Request) {
-  const rateLimit = consumeRateLimit({
+  const rateLimit = await consumeRateLimit({
     key: `stripe-cancel:${requestIdentity(request)}`,
     limit: 12,
     windowMs: 60_000,
   });
+  if (rateLimit.unavailable) {
+    return Response.json(
+      { error: "Service temporarily unavailable." },
+      {
+        status: 503,
+        headers: { "Retry-After": String(rateLimit.retryAfterSeconds) },
+      },
+    );
+  }
   if (!rateLimit.allowed) {
     return Response.json(
       { error: "Too many requests." },
@@ -39,7 +50,17 @@ export async function POST(request: Request) {
     return Response.json({ error: "Authentication required." }, { status: 401 });
   }
 
-  const body = (await request.json().catch(() => null)) as CancelBody | null;
+  const parsedBody = await readJsonBodyWithinLimit<CancelBody>(
+    request,
+    MAX_CANCEL_BODY_BYTES,
+  );
+  if (!parsedBody.ok) {
+    return Response.json(
+      { error: parsedBody.error },
+      { status: parsedBody.status },
+    );
+  }
+  const body = parsedBody.value;
   const reservationId =
     typeof body?.reservationId === "string" ? body.reservationId : "";
   if (!/^RSV-[A-F0-9]{24}$/.test(reservationId)) {

@@ -1,9 +1,6 @@
 import type Stripe from "stripe";
-import {
-  isTestSimulationEvent,
-  type CatalogEvent,
-  type TicketType,
-} from "@/lib/event";
+import type { CatalogEvent, TicketType } from "@/lib/event";
+import { createCheckoutPurchaseSnapshot } from "@/lib/checkout-purchase-snapshot";
 
 type BuildStripeCheckoutParamsInput = {
   baseUrl: string;
@@ -21,6 +18,10 @@ export function buildStripeCheckoutSessionParams(
   if (input.event.currency !== input.ticketType.currency) {
     throw new Error("CHECKOUT_CURRENCY_MISMATCH");
   }
+  const purchaseSnapshot = createCheckoutPurchaseSnapshot(
+    input.event,
+    input.ticketType,
+  );
 
   const productImageUrl = new URL(
     input.event.image,
@@ -28,7 +29,7 @@ export function buildStripeCheckoutSessionParams(
   );
   const productImages =
     productImageUrl.protocol === "https:" ? [productImageUrl.href] : undefined;
-  const testSimulation = isTestSimulationEvent(input.event);
+  const testSimulation = purchaseSnapshot.offerKind === "test-simulation";
 
   return {
     mode: "payment",
@@ -53,20 +54,20 @@ export function buildStripeCheckoutSessionParams(
       {
         quantity: 1,
         price_data: {
-          currency: input.ticketType.currency.toLowerCase(),
-          unit_amount: Math.round(input.ticketType.price * 100),
+          currency: purchaseSnapshot.currency.toLowerCase(),
+          unit_amount: purchaseSnapshot.unitAmountMinor,
           product_data: {
             name: testSimulation
-              ? `TEST TICKET — ${input.event.title}`
-              : input.event.title,
+              ? `TEST TICKET — ${purchaseSnapshot.eventName}`
+              : purchaseSnapshot.eventName,
             description: testSimulation
-              ? `${input.ticketType.label} · Stripe test payment · Not valid for venue entry`
-              : `${input.ticketType.label} · ${input.event.venue}`,
+              ? `${purchaseSnapshot.ticketLabel} · Stripe test payment · Not valid for venue entry`
+              : `${purchaseSnapshot.ticketLabel} · ${purchaseSnapshot.venue}`,
             ...(productImages ? { images: productImages } : {}),
             metadata: {
               eventId: input.event.id,
               ticketType: input.ticketType.id,
-              offerKind: input.event.checkoutMode ?? "source-only",
+              offerKind: purchaseSnapshot.offerKind,
             },
           },
         },
@@ -76,7 +77,7 @@ export function buildStripeCheckoutSessionParams(
       reservationId: input.reservationId,
       eventId: input.event.id,
       ticketType: input.ticketType.id,
-      offerKind: input.event.checkoutMode ?? "source-only",
+      offerKind: purchaseSnapshot.offerKind,
       locale: input.locale,
     },
     payment_intent_data: {

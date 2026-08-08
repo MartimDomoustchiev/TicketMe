@@ -2,35 +2,64 @@ import { issueEmailVerification } from "@/lib/auth-store";
 import { isValidEmail, normalizeEmail } from "@/lib/auth-validation";
 import { sendVerificationEmail } from "@/lib/email";
 import { consumeRateLimit, requestIdentity } from "@/lib/rate-limit";
+import { readJsonBodyWithinLimit } from "@/lib/request-body";
 import { isSameOriginRequest } from "@/lib/request-security";
 import { getBaseUrl, safeReturnPath } from "@/lib/site";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+const MAX_VERIFICATION_BODY_BYTES = 16 * 1024;
+
+type VerificationBody = {
+  email?: unknown;
+  locale?: unknown;
+  next?: unknown;
+};
 
 export async function POST(request: Request) {
   if (!isSameOriginRequest(request)) {
     return Response.json({ error: "generic" }, { status: 403 });
   }
 
-  const body = (await request.json().catch(() => null)) as {
-    email?: string;
-    locale?: string;
-    next?: string;
-  } | null;
-  const email = normalizeEmail(body?.email ?? "");
+  const parsedBody = await readJsonBodyWithinLimit<VerificationBody>(
+    request,
+    MAX_VERIFICATION_BODY_BYTES,
+  );
+  if (!parsedBody.ok) {
+    return Response.json(
+      { error: parsedBody.error },
+      { status: parsedBody.status },
+    );
+  }
+
+  const body = parsedBody.value;
+  const email = normalizeEmail(
+    typeof body?.email === "string" ? body.email : "",
+  );
   const locale = body?.locale === "en" ? "en" : "bg";
-  const next = safeReturnPath(body?.next, `/${locale}/events`);
+  const next = safeReturnPath(
+    typeof body?.next === "string" ? body.next : undefined,
+    `/${locale}/events`,
+  );
 
   if (!isValidEmail(email)) {
     return Response.json({ error: "email" }, { status: 400 });
   }
 
-  const rateLimit = consumeRateLimit({
+  const rateLimit = await consumeRateLimit({
     key: `verification:${requestIdentity(request)}:${email}`,
     limit: 5,
     windowMs: 15 * 60_000,
   });
+  if (rateLimit.unavailable) {
+    return Response.json(
+      { error: "service-unavailable" },
+      {
+        status: 503,
+        headers: { "Retry-After": String(rateLimit.retryAfterSeconds) },
+      },
+    );
+  }
   if (!rateLimit.allowed) {
     return Response.json(
       { error: "rate-limit" },

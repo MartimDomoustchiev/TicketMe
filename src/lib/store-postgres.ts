@@ -6,6 +6,11 @@ import {
   getTicketType,
   type TicketTypeId,
 } from "@/lib/event";
+import {
+  createCheckoutPurchaseSnapshot,
+  normalizeCheckoutPurchaseSnapshot,
+  type CheckoutPurchaseSnapshot,
+} from "@/lib/checkout-purchase-snapshot";
 import { emitAvailability } from "@/lib/store-file";
 import type {
   AttachCheckoutSessionInput,
@@ -88,7 +93,27 @@ async function prepareSchema(): Promise<void> {
       storage_key TEXT NOT NULL DEFAULT '',
       storage_url TEXT NOT NULL DEFAULT '',
       qr_secret TEXT NOT NULL,
-      status TEXT NOT NULL CHECK (status IN ('issued', 'checked_in'))
+      status TEXT NOT NULL CHECK (status IN ('issued', 'checked_in')),
+      purchase_offer_kind TEXT
+        CHECK (purchase_offer_kind IN ('admission', 'test-simulation')),
+      purchase_unit_amount_minor INTEGER
+        CHECK (purchase_unit_amount_minor >= 0),
+      purchase_currency TEXT
+        CHECK (purchase_currency ~ '^[A-Z]{3}$'),
+      purchase_event_name TEXT,
+      purchase_event_date TEXT,
+      purchase_venue TEXT,
+      purchase_ticket_label TEXT,
+      purchase_source_name TEXT,
+      purchase_source_url TEXT,
+      CHECK (
+        num_nonnulls(
+          purchase_offer_kind, purchase_unit_amount_minor,
+          purchase_currency, purchase_event_name, purchase_event_date,
+          purchase_venue, purchase_ticket_label, purchase_source_name,
+          purchase_source_url
+        ) IN (0, 9)
+      )
     )
   `;
   await db`
@@ -99,7 +124,16 @@ async function prepareSchema(): Promise<void> {
     ALTER TABLE tickets
       ADD COLUMN IF NOT EXISTS checkout_reservation_id TEXT,
       ADD COLUMN IF NOT EXISTS stripe_checkout_session_id TEXT,
-      ADD COLUMN IF NOT EXISTS stripe_payment_intent_id TEXT
+      ADD COLUMN IF NOT EXISTS stripe_payment_intent_id TEXT,
+      ADD COLUMN IF NOT EXISTS purchase_offer_kind TEXT,
+      ADD COLUMN IF NOT EXISTS purchase_unit_amount_minor INTEGER,
+      ADD COLUMN IF NOT EXISTS purchase_currency TEXT,
+      ADD COLUMN IF NOT EXISTS purchase_event_name TEXT,
+      ADD COLUMN IF NOT EXISTS purchase_event_date TEXT,
+      ADD COLUMN IF NOT EXISTS purchase_venue TEXT,
+      ADD COLUMN IF NOT EXISTS purchase_ticket_label TEXT,
+      ADD COLUMN IF NOT EXISTS purchase_source_name TEXT,
+      ADD COLUMN IF NOT EXISTS purchase_source_url TEXT
   `;
   await db`
     CREATE UNIQUE INDEX IF NOT EXISTS tickets_checkout_reservation_idx
@@ -169,8 +203,40 @@ async function prepareSchema(): Promise<void> {
         CHECK (delivery_attempts >= 0),
       delivery_lease_token TEXT,
       delivery_lease_expires_at TIMESTAMPTZ,
-      delivered_at TIMESTAMPTZ
+      delivered_at TIMESTAMPTZ,
+      purchase_offer_kind TEXT
+        CHECK (purchase_offer_kind IN ('admission', 'test-simulation')),
+      purchase_unit_amount_minor INTEGER
+        CHECK (purchase_unit_amount_minor >= 0),
+      purchase_currency TEXT
+        CHECK (purchase_currency ~ '^[A-Z]{3}$'),
+      purchase_event_name TEXT,
+      purchase_event_date TEXT,
+      purchase_venue TEXT,
+      purchase_ticket_label TEXT,
+      purchase_source_name TEXT,
+      purchase_source_url TEXT,
+      CHECK (
+        num_nonnulls(
+          purchase_offer_kind, purchase_unit_amount_minor,
+          purchase_currency, purchase_event_name, purchase_event_date,
+          purchase_venue, purchase_ticket_label, purchase_source_name,
+          purchase_source_url
+        ) IN (0, 9)
+      )
     )
+  `;
+  await db`
+    ALTER TABLE checkout_reservations
+      ADD COLUMN IF NOT EXISTS purchase_offer_kind TEXT,
+      ADD COLUMN IF NOT EXISTS purchase_unit_amount_minor INTEGER,
+      ADD COLUMN IF NOT EXISTS purchase_currency TEXT,
+      ADD COLUMN IF NOT EXISTS purchase_event_name TEXT,
+      ADD COLUMN IF NOT EXISTS purchase_event_date TEXT,
+      ADD COLUMN IF NOT EXISTS purchase_venue TEXT,
+      ADD COLUMN IF NOT EXISTS purchase_ticket_label TEXT,
+      ADD COLUMN IF NOT EXISTS purchase_source_name TEXT,
+      ADD COLUMN IF NOT EXISTS purchase_source_url TEXT
   `;
   await db`
     CREATE INDEX IF NOT EXISTS checkout_reservations_expiry_idx
@@ -304,6 +370,26 @@ function iso(value: unknown): string {
   return new Date(String(value)).toISOString();
 }
 
+function mapPurchaseSnapshot(
+  row: Record<string, unknown>,
+): CheckoutPurchaseSnapshot | null {
+  return normalizeCheckoutPurchaseSnapshot({
+    offerKind: row.purchase_offer_kind,
+    unitAmountMinor:
+      row.purchase_unit_amount_minor === null ||
+      row.purchase_unit_amount_minor === undefined
+        ? Number.NaN
+        : Number(row.purchase_unit_amount_minor),
+    currency: row.purchase_currency,
+    eventName: row.purchase_event_name,
+    eventDate: row.purchase_event_date,
+    venue: row.purchase_venue,
+    ticketLabel: row.purchase_ticket_label,
+    sourceName: row.purchase_source_name,
+    sourceUrl: row.purchase_source_url,
+  });
+}
+
 function mapTicket(row: Record<string, unknown>): StoredTicket {
   const checkoutReservationId = row.checkout_reservation_id
     ? String(row.checkout_reservation_id)
@@ -329,6 +415,7 @@ function mapTicket(row: Record<string, unknown>): StoredTicket {
     storageUrl: String(row.storage_url),
     qrSecret: String(row.qr_secret),
     status: String(row.status) as TicketStatus,
+    purchaseSnapshot: mapPurchaseSnapshot(row),
     ...(checkoutReservationId ? { checkoutReservationId } : {}),
     ...(stripeCheckoutSessionId ? { stripeCheckoutSessionId } : {}),
     ...(stripePaymentIntentId ? { stripePaymentIntentId } : {}),
@@ -367,6 +454,7 @@ function mapReservation(row: Record<string, unknown>): CheckoutReservation {
     deliveryAttempts: Number(row.delivery_attempts ?? 0),
     deliveryLeaseExpiresAt: nullableIso(row.delivery_lease_expires_at),
     deliveredAt: nullableIso(row.delivered_at),
+    purchaseSnapshot: mapPurchaseSnapshot(row),
   };
 }
 
@@ -668,6 +756,7 @@ export async function issueTicket(input: {
   ) {
     throw new Error("INVALID_TICKET_TYPE");
   }
+  const purchaseSnapshot = createCheckoutPurchaseSnapshot(event, ticketType);
 
   const db = databaseSql();
   const requestId = randomBytes(18).toString("base64url");
@@ -766,7 +855,11 @@ export async function issueTicket(input: {
           INSERT INTO tickets (
             id, buyer_name, buyer_email, ticket_type, seat_label,
             event_id, event_name, event_date, venue, issued_at,
-            storage_key, storage_url, qr_secret, status
+            storage_key, storage_url, qr_secret, status,
+            purchase_offer_kind, purchase_unit_amount_minor,
+            purchase_currency, purchase_event_name, purchase_event_date,
+            purchase_venue, purchase_ticket_label, purchase_source_name,
+            purchase_source_url
           )
           VALUES (
             ${id},
@@ -775,14 +868,23 @@ export async function issueTicket(input: {
             ${input.ticketType},
             ${seatLabel},
             ${event.id},
-            ${event.name},
-            ${`${event.date}, ${event.time}`},
-            ${event.venue},
+            ${purchaseSnapshot.eventName},
+            ${purchaseSnapshot.eventDate},
+            ${purchaseSnapshot.venue},
             ${issuedAt},
             ${input.storageKey},
             ${input.storageUrl},
             ${input.qrSecret},
-            'issued'
+            'issued',
+            ${purchaseSnapshot.offerKind},
+            ${purchaseSnapshot.unitAmountMinor},
+            ${purchaseSnapshot.currency},
+            ${purchaseSnapshot.eventName},
+            ${purchaseSnapshot.eventDate},
+            ${purchaseSnapshot.venue},
+            ${purchaseSnapshot.ticketLabel},
+            ${purchaseSnapshot.sourceName},
+            ${purchaseSnapshot.sourceUrl}
           )
           RETURNING *
         `;
@@ -836,9 +938,13 @@ export async function reserveCheckoutTicket(
   input: ReserveCheckoutTicketInput,
 ): Promise<CheckoutReservation> {
   const event = await ensureEventInventory(input.eventId ?? EVENT.id);
-  if (!event.ticketTypes.some((type) => type.id === input.ticketType)) {
+  const ticketType = event.ticketTypes.find(
+    (candidate) => candidate.id === input.ticketType,
+  );
+  if (!ticketType) {
     throw new Error("INVALID_TICKET_TYPE");
   }
+  const purchaseSnapshot = createCheckoutPurchaseSnapshot(event, ticketType);
 
   const lifetimeMs =
     typeof input.expiresInMs === "number" &&
@@ -962,7 +1068,11 @@ export async function reserveCheckoutTicket(
         const rows = await transaction`
           INSERT INTO checkout_reservations (
             id, event_id, ticket_type, buyer_name, buyer_email, locale,
-            status, created_at, expires_at
+            status, created_at, expires_at,
+            purchase_offer_kind, purchase_unit_amount_minor,
+            purchase_currency, purchase_event_name, purchase_event_date,
+            purchase_venue, purchase_ticket_label, purchase_source_name,
+            purchase_source_url
           )
           VALUES (
             ${reservationId},
@@ -973,7 +1083,16 @@ export async function reserveCheckoutTicket(
             ${input.locale === "en" ? "en" : "bg"},
             'reserved',
             ${createdAt},
-            ${expiresAt}
+            ${expiresAt},
+            ${purchaseSnapshot.offerKind},
+            ${purchaseSnapshot.unitAmountMinor},
+            ${purchaseSnapshot.currency},
+            ${purchaseSnapshot.eventName},
+            ${purchaseSnapshot.eventDate},
+            ${purchaseSnapshot.venue},
+            ${purchaseSnapshot.ticketLabel},
+            ${purchaseSnapshot.sourceName},
+            ${purchaseSnapshot.sourceUrl}
           )
           RETURNING *
         `;
@@ -1367,7 +1486,9 @@ export async function listTicketDeliveriesForRetry(
           )
         )
       )
-    ORDER BY COALESCE(fulfilled_at, created_at) ASC, id ASC
+    ORDER BY delivery_attempts ASC,
+      COALESCE(fulfilled_at, created_at) ASC,
+      id ASC
     LIMIT ${boundedLimit}
   `;
 
@@ -1473,20 +1594,27 @@ export async function fulfillCheckoutReservation(
       ) {
         return null;
       }
+      if (!reservation.purchaseSnapshot) {
+        throw new Error("CHECKOUT_PURCHASE_SNAPSHOT_MISSING");
+      }
 
       const id = `TKT-${randomBytes(12).toString("hex").toUpperCase()}`;
       const issuedAt = new Date().toISOString();
       const seatLabel = `${reservation.ticketType.toUpperCase()}-${id.slice(
         -10,
       )}`;
-      const reservationEvent = requireEvent(reservation.eventId);
+      const purchaseSnapshot = reservation.purchaseSnapshot;
       const ticketRows = await transaction`
         INSERT INTO tickets (
           id, buyer_name, buyer_email, ticket_type, seat_label,
           event_id, event_name, event_date, venue, issued_at,
           storage_key, storage_url, qr_secret, status,
           checkout_reservation_id, stripe_checkout_session_id,
-          stripe_payment_intent_id
+          stripe_payment_intent_id,
+          purchase_offer_kind, purchase_unit_amount_minor,
+          purchase_currency, purchase_event_name, purchase_event_date,
+          purchase_venue, purchase_ticket_label, purchase_source_name,
+          purchase_source_url
         )
         VALUES (
           ${id},
@@ -1495,9 +1623,9 @@ export async function fulfillCheckoutReservation(
           ${reservation.ticketType},
           ${seatLabel},
           ${reservation.eventId},
-          ${reservationEvent.name},
-          ${`${reservationEvent.date}, ${reservationEvent.time}`},
-          ${reservationEvent.venue},
+          ${purchaseSnapshot.eventName},
+          ${purchaseSnapshot.eventDate},
+          ${purchaseSnapshot.venue},
           ${issuedAt},
           ${input.storageKey},
           ${input.storageUrl},
@@ -1505,7 +1633,16 @@ export async function fulfillCheckoutReservation(
           'issued',
           ${reservation.id},
           ${reservation.stripeCheckoutSessionId},
-          ${input.stripePaymentIntentId ?? null}
+          ${input.stripePaymentIntentId ?? null},
+          ${purchaseSnapshot.offerKind},
+          ${purchaseSnapshot.unitAmountMinor},
+          ${purchaseSnapshot.currency},
+          ${purchaseSnapshot.eventName},
+          ${purchaseSnapshot.eventDate},
+          ${purchaseSnapshot.venue},
+          ${purchaseSnapshot.ticketLabel},
+          ${purchaseSnapshot.sourceName},
+          ${purchaseSnapshot.sourceUrl}
         )
         RETURNING *
       `;

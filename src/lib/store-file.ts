@@ -7,6 +7,13 @@ import {
   getTicketType,
   type TicketTypeId,
 } from "@/lib/event";
+import {
+  createCheckoutPurchaseSnapshot,
+  normalizeCheckoutPurchaseSnapshot,
+  type CheckoutPurchaseSnapshot,
+} from "@/lib/checkout-purchase-snapshot";
+
+export type { CheckoutPurchaseSnapshot } from "@/lib/checkout-purchase-snapshot";
 
 export type TicketStatus = "issued" | "checked_in";
 
@@ -34,6 +41,7 @@ export type StoredTicket = {
   storageUrl: string;
   qrSecret: string;
   status: TicketStatus;
+  purchaseSnapshot: CheckoutPurchaseSnapshot | null;
   checkoutReservationId?: string;
   stripeCheckoutSessionId?: string;
   stripePaymentIntentId?: string;
@@ -58,6 +66,7 @@ export type CheckoutReservation = {
   deliveryAttempts: number;
   deliveryLeaseExpiresAt: string | null;
   deliveredAt: string | null;
+  purchaseSnapshot: CheckoutPurchaseSnapshot | null;
 };
 
 type StoredCheckoutReservation = CheckoutReservation & {
@@ -140,7 +149,7 @@ export type PurchaseActivity = {
 type EventInventory = Partial<Record<TicketTypeId, number>>;
 
 type DbState = {
-  version: 3;
+  version: 4;
   inventory: Record<string, EventInventory>;
   verificationTokens: Record<string, VerificationToken>;
   tickets: Record<string, StoredTicket>;
@@ -188,7 +197,7 @@ function initialRemaining(eventId: string): Record<TicketTypeId, number> {
 
 function initialState(): DbState {
   return {
-    version: 3,
+    version: 4,
     inventory: {
       [EVENT.id]: initialRemaining(EVENT.id),
     },
@@ -260,6 +269,18 @@ function normalizeReservation(
     deliveryLeaseToken: reservation.deliveryLeaseToken ?? null,
     deliveryLeaseExpiresAt: reservation.deliveryLeaseExpiresAt ?? null,
     deliveredAt: reservation.deliveredAt ?? null,
+    purchaseSnapshot: normalizeCheckoutPurchaseSnapshot(
+      reservation.purchaseSnapshot,
+    ),
+  };
+}
+
+function normalizeTicket(ticket: StoredTicket): StoredTicket {
+  return {
+    ...ticket,
+    purchaseSnapshot: normalizeCheckoutPurchaseSnapshot(
+      ticket.purchaseSnapshot,
+    ),
   };
 }
 
@@ -304,11 +325,18 @@ function normalizeState(state: LegacyDbState): DbState {
       .map((reservation) => [reservation.id, reservation]),
   );
 
+  const tickets = Object.fromEntries(
+    Object.values(state.tickets ?? {}).map((ticket) => {
+      const normalized = normalizeTicket(ticket);
+      return [normalized.id, normalized];
+    }),
+  );
+
   return {
-    version: 3,
+    version: 4,
     inventory,
     verificationTokens: state.verificationTokens ?? {},
-    tickets: state.tickets ?? {},
+    tickets,
     checkoutReservations,
     auditLog: state.auditLog ?? [],
   };
@@ -406,7 +434,12 @@ function publicReservation(
   const { deliveryLeaseToken: _deliveryLeaseToken, ...publicFields } =
     reservation;
   void _deliveryLeaseToken;
-  return { ...publicFields };
+  return {
+    ...publicFields,
+    purchaseSnapshot: publicFields.purchaseSnapshot
+      ? { ...publicFields.purchaseSnapshot }
+      : null,
+  };
 }
 
 function isActiveReservation(
@@ -511,8 +544,19 @@ function createStoredTicket(input: {
   checkoutReservationId?: string;
   stripeCheckoutSessionId?: string;
   stripePaymentIntentId?: string;
+  purchaseSnapshot?: CheckoutPurchaseSnapshot;
 }): StoredTicket {
-  const event = requireEvent(input.eventId);
+  let purchaseSnapshot = input.purchaseSnapshot;
+  if (!purchaseSnapshot) {
+    const event = requireEvent(input.eventId);
+    const ticketType = event.ticketTypes.find(
+      (candidate) => candidate.id === input.ticketType,
+    );
+    if (!ticketType) {
+      throw new Error("INVALID_TICKET_TYPE");
+    }
+    purchaseSnapshot = createCheckoutPurchaseSnapshot(event, ticketType);
+  }
   let id: string;
   do {
     id = `TKT-${randomBytes(12).toString("hex").toUpperCase()}`;
@@ -524,15 +568,16 @@ function createStoredTicket(input: {
     buyerEmail: input.buyerEmail.toLowerCase(),
     ticketType: input.ticketType,
     seatLabel: `${input.ticketType.toUpperCase()}-${id.slice(-10)}`,
-    eventId: event.id,
-    eventName: event.name,
-    eventDate: `${event.date}, ${event.time}`,
-    venue: event.venue,
+    eventId: input.eventId,
+    eventName: purchaseSnapshot.eventName,
+    eventDate: purchaseSnapshot.eventDate,
+    venue: purchaseSnapshot.venue,
     issuedAt: new Date().toISOString(),
     storageKey: input.storageKey,
     storageUrl: input.storageUrl,
     qrSecret: input.qrSecret,
     status: "issued",
+    purchaseSnapshot: { ...purchaseSnapshot },
     ...(input.checkoutReservationId
       ? { checkoutReservationId: input.checkoutReservationId }
       : {}),
@@ -706,9 +751,13 @@ export async function reserveCheckoutTicket(
   input: ReserveCheckoutTicketInput,
 ): Promise<CheckoutReservation> {
   const event = requireEvent(input.eventId ?? EVENT.id);
-  if (!event.ticketTypes.some((type) => type.id === input.ticketType)) {
+  const ticketType = event.ticketTypes.find(
+    (candidate) => candidate.id === input.ticketType,
+  );
+  if (!ticketType) {
     throw new Error("INVALID_TICKET_TYPE");
   }
+  const purchaseSnapshot = createCheckoutPurchaseSnapshot(event, ticketType);
 
   const lifetimeMs =
     typeof input.expiresInMs === "number" &&
@@ -767,6 +816,7 @@ export async function reserveCheckoutTicket(
       deliveryLeaseToken: null,
       deliveryLeaseExpiresAt: null,
       deliveredAt: null,
+      purchaseSnapshot: { ...purchaseSnapshot },
     };
 
     remainingByType[input.ticketType] = remaining - 1;
@@ -1017,6 +1067,10 @@ export async function listTicketDeliveriesForRetry(
               Date.parse(reservation.deliveryLeaseExpiresAt) <= now))),
     )
     .sort((left, right) => {
+      const attempts = left.deliveryAttempts - right.deliveryAttempts;
+      if (attempts !== 0) {
+        return attempts;
+      }
       const leftOldest = Date.parse(left.fulfilledAt ?? left.createdAt);
       const rightOldest = Date.parse(right.fulfilledAt ?? right.createdAt);
       return leftOldest - rightOldest || left.id.localeCompare(right.id);
@@ -1104,6 +1158,10 @@ export async function fulfillCheckoutReservation(
       throw new Error("PAYMENT_INTENT_ALREADY_USED");
     }
 
+    if (!reservation.purchaseSnapshot) {
+      throw new Error("CHECKOUT_PURCHASE_SNAPSHOT_MISSING");
+    }
+
     const ticket = createStoredTicket({
       state,
       eventId: reservation.eventId,
@@ -1117,6 +1175,7 @@ export async function fulfillCheckoutReservation(
       stripeCheckoutSessionId:
         reservation.stripeCheckoutSessionId ?? undefined,
       stripePaymentIntentId: input.stripePaymentIntentId,
+      purchaseSnapshot: reservation.purchaseSnapshot,
     });
     const fulfilledAt = new Date().toISOString();
     reservation.status = "fulfilled";

@@ -1,5 +1,6 @@
 import { createUserSession } from "@/lib/auth";
 import { consumeEmailVerification } from "@/lib/auth-store";
+import { readUrlEncodedBodyWithinLimit } from "@/lib/request-body";
 import { isSameOriginRequest } from "@/lib/request-security";
 import { safeReturnPath } from "@/lib/site";
 
@@ -7,6 +8,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 type Locale = "bg" | "en";
+const MAX_VERIFICATION_BODY_BYTES = 16 * 1024;
 
 function requestContext(request: Request, rawNext: string | null) {
   const next = safeReturnPath(rawNext, "/bg/events");
@@ -61,12 +63,20 @@ export async function POST(request: Request): Promise<Response> {
     });
   }
 
-  let formData: FormData;
-  try {
-    formData = await request.formData();
-  } catch {
-    return seeOther("/bg/login?mode=login&error=generic", request);
+  const parsedBody = await readUrlEncodedBodyWithinLimit(
+    request,
+    MAX_VERIFICATION_BODY_BYTES,
+  );
+  if (!parsedBody.ok) {
+    return Response.json(
+      { error: parsedBody.error },
+      {
+        status: parsedBody.status,
+        headers: { "Cache-Control": "no-store" },
+      },
+    );
   }
+  const formData = parsedBody.value;
 
   const token = String(formData.get("token") ?? "");
   const { locale, next } = requestContext(

@@ -3,10 +3,12 @@ import {
   publishCatalogEvent,
   rejectCatalogEvent,
 } from "@/lib/catalog-postgres";
+import { readJsonBodyWithinLimit } from "@/lib/request-body";
 import { isSameOriginRequest } from "@/lib/request-security";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+const MAX_REVIEW_BODY_BYTES = 8 * 1024;
 
 type ReviewBody = {
   action?: unknown;
@@ -30,14 +32,19 @@ export async function POST(request: Request) {
     return json({ error: "Forbidden." }, 403);
   }
 
-  let body: ReviewBody;
-  try {
-    body = (await request.json()) as ReviewBody;
-  } catch {
-    return json({ error: "Invalid JSON body." }, 400);
+  const parsedBody = await readJsonBodyWithinLimit<ReviewBody | null>(
+    request,
+    MAX_REVIEW_BODY_BYTES,
+  );
+  if (!parsedBody.ok) {
+    return json({ error: parsedBody.error }, parsedBody.status);
   }
+  const body = parsedBody.value;
 
   if (
+    !body ||
+    typeof body !== "object" ||
+    Array.isArray(body) ||
     typeof body.eventId !== "string" ||
     body.eventId.length < 1 ||
     body.eventId.length > 200 ||

@@ -21,6 +21,7 @@ import type {
 export type {
   AttachCheckoutSessionInput,
   Availability,
+  CheckoutPurchaseSnapshot,
   CheckoutFulfillmentResult,
   CheckoutLocale,
   CheckoutReservation,

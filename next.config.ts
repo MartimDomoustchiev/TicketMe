@@ -10,11 +10,17 @@ const contentSecurityPolicy = [
   "connect-src 'self' https://api.stripe.com https://checkout.stripe.com https://r.stripe.com",
   "frame-src https://checkout.stripe.com https://hooks.stripe.com https://js.stripe.com",
   "frame-ancestors 'none'",
+  "object-src 'none'",
+  "media-src 'self'",
+  "manifest-src 'self'",
+  "worker-src 'self' blob:",
   "base-uri 'self'",
   "form-action 'self'",
+  ...(!isDevelopment ? ["upgrade-insecure-requests"] : []),
 ].join("; ");
 
 const nextConfig: NextConfig = {
+  poweredByHeader: false,
   // Let Wrangler resolve Postgres.js through its `workerd` conditional export
   // instead of baking the Node TCP implementation into the Next.js bundle.
   serverExternalPackages: ["postgres"],
@@ -24,6 +30,16 @@ const nextConfig: NextConfig = {
   outputFileTracingIncludes: {
     "/*": ["./global-bundle.pem"],
   },
+  async redirects() {
+    return [
+      {
+        source: "/:path*",
+        has: [{ type: "host", value: "tiketko.top" }],
+        destination: "https://www.tiketko.top/:path*",
+        permanent: true,
+      },
+    ];
+  },
   async headers() {
     return [
       {
@@ -31,6 +47,10 @@ const nextConfig: NextConfig = {
         headers: [
           { key: "X-Content-Type-Options", value: "nosniff" },
           { key: "X-Frame-Options", value: "DENY" },
+          {
+            key: "X-Permitted-Cross-Domain-Policies",
+            value: "none",
+          },
           {
             key: "Content-Security-Policy",
             value: contentSecurityPolicy,
@@ -46,10 +66,23 @@ const nextConfig: NextConfig = {
           { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
           {
             key: "Permissions-Policy",
-            value: "camera=(), microphone=(), geolocation=()",
+            value:
+              "camera=(), microphone=(), geolocation=(), browsing-topics=()",
           },
         ],
       },
+      ...[
+        "/:locale(bg|en)/verify",
+        "/:locale(bg|en)/admin/check-in",
+        "/api/tickets/:id/verify",
+      ].map((source) => ({
+        source,
+        headers: [
+          { key: "Referrer-Policy", value: "no-referrer" },
+          { key: "Cache-Control", value: "private, no-store" },
+          { key: "X-Robots-Tag", value: "noindex, nofollow" },
+        ],
+      })),
     ];
   },
 };

@@ -1,5 +1,6 @@
 import { getBuyerSession } from "@/lib/auth";
 import { consumeRateLimit, requestIdentity } from "@/lib/rate-limit";
+import { readJsonBodyWithinLimit } from "@/lib/request-body";
 import { isSameOriginRequest } from "@/lib/request-security";
 import { getBaseUrl } from "@/lib/site";
 import {
@@ -11,6 +12,7 @@ import { fulfillStripeCheckoutSession } from "@/lib/stripe-fulfillment";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 30;
+const MAX_COMPLETE_BODY_BYTES = 8 * 1024;
 
 type CompleteBody = {
   sessionId?: unknown;
@@ -46,7 +48,17 @@ export async function POST(request: Request) {
     );
   }
 
-  const body = (await request.json().catch(() => null)) as CompleteBody | null;
+  const parsedBody = await readJsonBodyWithinLimit<CompleteBody>(
+    request,
+    MAX_COMPLETE_BODY_BYTES,
+  );
+  if (!parsedBody.ok) {
+    return Response.json(
+      { error: parsedBody.error },
+      { status: parsedBody.status },
+    );
+  }
+  const body = parsedBody.value;
   const locale = body?.locale === "en" ? "en" : "bg";
   const copy = COPY[locale];
   const sessionId =
@@ -59,11 +71,20 @@ export async function POST(request: Request) {
     );
   }
 
-  const rateLimit = consumeRateLimit({
+  const rateLimit = await consumeRateLimit({
     key: `stripe-complete:${requestIdentity(request)}`,
     limit: 20,
     windowMs: 60_000,
   });
+  if (rateLimit.unavailable) {
+    return Response.json(
+      { error: copy.failed },
+      {
+        status: 503,
+        headers: { "Retry-After": String(rateLimit.retryAfterSeconds) },
+      },
+    );
+  }
   if (!rateLimit.allowed) {
     return Response.json(
       { error: copy.rateLimit },

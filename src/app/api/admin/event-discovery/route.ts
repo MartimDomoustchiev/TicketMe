@@ -1,5 +1,6 @@
 import { getActiveAccount } from "@/lib/auth";
 import { runEventDiscovery } from "@/lib/event-discovery";
+import { consumeRateLimit } from "@/lib/rate-limit";
 import { isSameOriginRequest } from "@/lib/request-security";
 
 export const runtime = "nodejs";
@@ -9,10 +10,13 @@ export const maxDuration = 60;
 function jsonResponse(
   body: Record<string, unknown>,
   status = 200,
+  headers?: HeadersInit,
 ): Response {
+  const responseHeaders = new Headers(headers);
+  responseHeaders.set("Cache-Control", "no-store");
   return Response.json(body, {
     status,
-    headers: { "Cache-Control": "no-store" },
+    headers: responseHeaders,
   });
 }
 
@@ -24,6 +28,23 @@ export async function POST(request: Request) {
   const account = await getActiveAccount();
   if (account?.role !== "admin") {
     return jsonResponse({ error: "Forbidden." }, 403);
+  }
+
+  const rateLimit = await consumeRateLimit({
+    key: `admin-discovery:${account.email.trim().toLowerCase()}`,
+    limit: 3,
+    windowMs: 15 * 60_000,
+  });
+  if (!rateLimit.allowed) {
+    return jsonResponse(
+      {
+        error: rateLimit.unavailable
+          ? "Service unavailable."
+          : "Too many discovery requests.",
+      },
+      rateLimit.unavailable ? 503 : 429,
+      { "Retry-After": String(rateLimit.retryAfterSeconds) },
+    );
   }
 
   try {

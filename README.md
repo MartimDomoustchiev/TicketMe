@@ -240,7 +240,7 @@ ticket pools. При AWS RDS връзката fail-ва затворено, ак
 
    ```dotenv
    DATABASE_URL=""
-   DATABASE_HOST="database-1.cc1caw88ki2i.us-east-1.rds.amazonaws.com"
+   DATABASE_HOST="ticket-db.placeholder.eu-central-1.rds.amazonaws.com"
    DATABASE_PORT="5432"
    DATABASE_NAME="mydb"
    DATABASE_USER="postgres"
@@ -599,6 +599,9 @@ Git или да се споделят в screenshots. `sk_test_`, `sk_live_` и 
 
 ## Сигурност
 
+Подробният operational hardening, incident-response и 300-user load-test
+runbook е в [docs/SECURITY_GUIDE.md](docs/SECURITY_GUIDE.md).
+
 - Паролите се пазят като индивидуално salted `scrypt` hashes; plaintext
   парола никога не се записва.
 - Browser-ът получава само cryptographically random opaque session token в
@@ -650,10 +653,10 @@ Git или да се споделят в screenshots. `sk_test_`, `sk_live_` и 
   custom-domain email, storage, public HTTPS URL или валиден Stripe secret key,
   или ако PostgreSQL TLS не е активен. Webhook наличността се отчита отделно.
 
-Вграденият rate limiter е process-local. При голям multi-instance deployment
-трябва да бъде заменен или допълнен с edge/WAF rate limiting или shared Redis
-limiter. Това не засяга inventory correctness, която се пази транзакционно от
-PostgreSQL.
+В production rate limiter-ът използва атомарни shared PostgreSQL buckets с
+hashed identity keys и fail-closed поведение; local development пази bounded
+in-process buckets. Edge/WAF rules остават необходим втори слой срещу volumetric
+abuse. Inventory correctness се пази отделно и транзакционно от PostgreSQL.
 
 ## Проверки и тестова стратегия
 
@@ -672,11 +675,10 @@ curl -i http://localhost:3000/api/health
 
 `next build` изпълнява production compilation и TypeScript проверката.
 `npm run check` изпълнява ESLint, automated tests и production build с
-TypeScript проверка. Production `/api/health` връща `503 degraded`, ако
-PostgreSQL/TLS не е достъпен или липсва задължителна public HTTPS URL,
-custom-domain Resend sender, S3/R2 конфигурация или валиден Stripe secret key.
-Webhook readiness се показва отделно. Health route-ът не извършва тестово
-плащане.
+TypeScript проверка. Production `/api/health` връща само `ready` или `degraded`
+и съответно HTTP `200`/`503`; подробности за database, TLS, storage, email и
+Stripe не се разкриват публично. Readiness probe-ът е coalesced и кеширан за 30
+секунди на instance и не извършва тестово плащане.
 
 За integration/load test използвай отделна staging database, Stripe sandbox и
 валидна buyer session. Acceptance условията са:

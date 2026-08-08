@@ -13,7 +13,7 @@ import {
 const TEST_CA =
   "-----BEGIN CERTIFICATE-----\nTEST\n-----END CERTIFICATE-----";
 const RDS_HOST =
-  "database-1.cc1caw88ki2i.us-east-1.rds.amazonaws.com";
+  "ticket-db.placeholder.eu-central-1.rds.amazonaws.com";
 
 test("AWS RDS uses one verified TLS pool configuration", () => {
   const connection = resolveDatabaseConnection({

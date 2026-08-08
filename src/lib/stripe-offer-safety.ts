@@ -1,25 +1,63 @@
 import type Stripe from "stripe";
-import type { CatalogEvent } from "@/lib/event";
+import type { CheckoutPurchaseSnapshot } from "@/lib/checkout-purchase-snapshot";
 
 type CheckoutOfferSession = Pick<
   Stripe.Checkout.Session,
   "livemode" | "metadata"
 >;
 
-type CheckoutOfferEvent = Pick<CatalogEvent, "checkoutMode">;
+type CheckoutOfferSnapshot = Pick<CheckoutPurchaseSnapshot, "offerKind">;
+
+type CheckoutPurchaseSession = Pick<
+  Stripe.Checkout.Session,
+  "amount_total" | "currency" | "livemode" | "metadata"
+>;
+
+type CheckoutPurchaseReservation = {
+  eventId: string;
+  ticketType: string;
+  purchaseSnapshot: CheckoutPurchaseSnapshot | null;
+};
 
 export function assertStripeCheckoutOfferSafety(
   session: CheckoutOfferSession,
-  event: CheckoutOfferEvent,
+  snapshot: CheckoutOfferSnapshot,
 ): void {
-  const expectedOfferKind = event.checkoutMode ?? "source-only";
   const sessionOfferKind = session.metadata?.offerKind;
 
-  if (sessionOfferKind && sessionOfferKind !== expectedOfferKind) {
+  if (sessionOfferKind !== snapshot.offerKind) {
     throw new Error("CHECKOUT_OFFER_KIND_MISMATCH");
   }
 
-  if (expectedOfferKind === "test-simulation" && session.livemode) {
+  if (snapshot.offerKind === "test-simulation" && session.livemode) {
     throw new Error("TEST_SIMULATION_LIVE_PAYMENT");
   }
+}
+
+export function assertStripeCheckoutPurchaseSnapshot(
+  session: CheckoutPurchaseSession,
+  reservation: CheckoutPurchaseReservation,
+): CheckoutPurchaseSnapshot {
+  const snapshot = reservation.purchaseSnapshot;
+  if (!snapshot) {
+    throw new Error("CHECKOUT_PURCHASE_SNAPSHOT_MISSING");
+  }
+
+  assertStripeCheckoutOfferSafety(session, snapshot);
+
+  if (
+    session.metadata?.eventId !== reservation.eventId ||
+    session.metadata?.ticketType !== reservation.ticketType
+  ) {
+    throw new Error("CHECKOUT_METADATA_MISMATCH");
+  }
+
+  if (
+    session.amount_total !== snapshot.unitAmountMinor ||
+    session.currency?.toUpperCase() !== snapshot.currency
+  ) {
+    throw new Error("CHECKOUT_AMOUNT_MISMATCH");
+  }
+
+  return snapshot;
 }

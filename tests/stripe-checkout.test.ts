@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+import path from "node:path";
 import test from "node:test";
+import { createCheckoutPurchaseSnapshot } from "../src/lib/checkout-purchase-snapshot";
 import {
   EVENT,
   PRIMARY_SALE_EVENT,
@@ -7,7 +10,10 @@ import {
   type TicketType,
 } from "../src/lib/event";
 import { buildStripeCheckoutSessionParams } from "../src/lib/stripe-checkout";
-import { assertStripeCheckoutOfferSafety } from "../src/lib/stripe-offer-safety";
+import {
+  assertStripeCheckoutOfferSafety,
+  assertStripeCheckoutPurchaseSnapshot,
+} from "../src/lib/stripe-offer-safety";
 
 const TICKET_TYPE: TicketType = {
   id: "standard",
@@ -30,6 +36,28 @@ const INTERNAL_EVENT: CatalogEvent = {
   saleMode: "internal",
   ticketTypes: [TICKET_TYPE],
 };
+
+test("checkout rejects cross-origin requests before reading a bounded body", async () => {
+  const route = await readFile(
+    path.join(
+      process.cwd(),
+      "src/app/api/stripe/checkout/route.ts",
+    ),
+    "utf8",
+  );
+  const originCheck = route.indexOf("if (!isSameOriginRequest(request))");
+  const bodyRead = route.indexOf(
+    "await readJsonBodyWithinLimit<CheckoutBody>",
+  );
+
+  assert.ok(originCheck >= 0);
+  assert.ok(bodyRead > originCheck);
+  assert.match(route, /MAX_CHECKOUT_BODY_BYTES\s*=\s*8 \* 1024/);
+  assert.match(route, /key: `stripe-checkout:ip:\$\{requestIdentity\(request\)\}`/);
+  assert.match(route, /limit: 120/);
+  assert.match(route, /key: `stripe-checkout:account:\$\{session\.email/);
+  assert.match(route, /limit: 8/);
+});
 
 test("embedded Checkout stays on-site and enables eligible card wallets", () => {
   const ticketType = TICKET_TYPE;
@@ -133,14 +161,14 @@ test("external test simulation is unmistakably non-admission in Stripe", () => {
   assert.doesNotThrow(() =>
     assertStripeCheckoutOfferSafety(
       { livemode: false, metadata: { offerKind: "test-simulation" } },
-      EVENT,
+      { offerKind: "test-simulation" },
     ),
   );
   assert.throws(
     () =>
       assertStripeCheckoutOfferSafety(
         { livemode: true, metadata: { offerKind: "test-simulation" } },
-        EVENT,
+        { offerKind: "test-simulation" },
       ),
     /TEST_SIMULATION_LIVE_PAYMENT/,
   );
@@ -151,7 +179,7 @@ test("external test simulation is unmistakably non-admission in Stripe", () => {
           livemode: false,
           metadata: { offerKind: "admission" },
         },
-        EVENT,
+        { offerKind: "test-simulation" },
       ),
     /CHECKOUT_OFFER_KIND_MISMATCH/,
   );
@@ -175,6 +203,54 @@ test("Checkout rejects an event and ticket currency mismatch", () => {
         buyerEmail: "wallet@example.com",
       }),
     /CHECKOUT_CURRENCY_MISMATCH/,
+  );
+});
+
+test("Stripe fulfillment is pinned to the immutable reservation snapshot", () => {
+  const snapshot = createCheckoutPurchaseSnapshot(INTERNAL_EVENT, TICKET_TYPE);
+  const reservation = {
+    eventId: INTERNAL_EVENT.id,
+    ticketType: TICKET_TYPE.id,
+    purchaseSnapshot: snapshot,
+  };
+  const session = {
+    amount_total: snapshot.unitAmountMinor,
+    currency: snapshot.currency.toLowerCase(),
+    livemode: false,
+    metadata: {
+      eventId: reservation.eventId,
+      ticketType: reservation.ticketType,
+      offerKind: snapshot.offerKind,
+    },
+  };
+
+  assert.equal(
+    assertStripeCheckoutPurchaseSnapshot(session, reservation),
+    snapshot,
+  );
+  assert.throws(
+    () =>
+      assertStripeCheckoutPurchaseSnapshot(
+        { ...session, amount_total: snapshot.unitAmountMinor + 1 },
+        reservation,
+      ),
+    /CHECKOUT_AMOUNT_MISMATCH/,
+  );
+  assert.throws(
+    () =>
+      assertStripeCheckoutPurchaseSnapshot(
+        { ...session, metadata: { offerKind: snapshot.offerKind } },
+        reservation,
+      ),
+    /CHECKOUT_METADATA_MISMATCH/,
+  );
+  assert.throws(
+    () =>
+      assertStripeCheckoutPurchaseSnapshot(session, {
+        ...reservation,
+        purchaseSnapshot: null,
+      }),
+    /CHECKOUT_PURCHASE_SNAPSHOT_MISSING/,
   );
 });
 

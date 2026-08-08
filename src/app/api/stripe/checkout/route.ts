@@ -6,6 +6,7 @@ import {
   isTicketTypeId,
 } from "@/lib/event";
 import { consumeRateLimit, requestIdentity } from "@/lib/rate-limit";
+import { readJsonBodyWithinLimit } from "@/lib/request-body";
 import { isSameOriginRequest } from "@/lib/request-security";
 import { getBaseUrl } from "@/lib/site";
 import {
@@ -23,6 +24,7 @@ import { buildStripeCheckoutSessionParams } from "@/lib/stripe-checkout";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 30;
+const MAX_CHECKOUT_BODY_BYTES = 8 * 1024;
 
 type CheckoutBody = {
   eventId?: unknown;
@@ -68,28 +70,58 @@ function checkoutError(
 }
 
 export async function POST(request: Request) {
-  const body = (await request.json().catch(() => null)) as CheckoutBody | null;
-  const locale = body?.locale === "en" ? "en" : "bg";
-  const errorCopy = ERROR_COPY[locale];
-  const rateLimit = consumeRateLimit({
-    key: `stripe-checkout:${requestIdentity(request)}`,
-    limit: 8,
+  if (!isSameOriginRequest(request)) {
+    return checkoutError(ERROR_COPY.bg.invalidOrigin, 403);
+  }
+
+  const preAuthRateLimit = await consumeRateLimit({
+    key: `stripe-checkout:ip:${requestIdentity(request)}`,
+    limit: 120,
     windowMs: 60_000,
   });
 
-  if (!rateLimit.allowed) {
-    return checkoutError(errorCopy.rateLimit, 429, {
-      "Retry-After": String(rateLimit.retryAfterSeconds),
+  if (preAuthRateLimit.unavailable) {
+    return checkoutError(ERROR_COPY.bg.unavailable, 503, {
+      "Retry-After": String(preAuthRateLimit.retryAfterSeconds),
     });
   }
 
-  if (!isSameOriginRequest(request)) {
-    return checkoutError(errorCopy.invalidOrigin, 403);
+  if (!preAuthRateLimit.allowed) {
+    return checkoutError(ERROR_COPY.bg.rateLimit, 429, {
+      "Retry-After": String(preAuthRateLimit.retryAfterSeconds),
+    });
   }
+
+  const parsedBody = await readJsonBodyWithinLimit<CheckoutBody>(
+    request,
+    MAX_CHECKOUT_BODY_BYTES,
+  );
+  if (!parsedBody.ok) {
+    return checkoutError(parsedBody.error, parsedBody.status);
+  }
+  const body = parsedBody.value;
+  const locale = body?.locale === "en" ? "en" : "bg";
+  const errorCopy = ERROR_COPY[locale];
 
   const session = await getBuyerSession();
   if (!session) {
     return checkoutError(errorCopy.signIn, 401);
+  }
+
+  const accountRateLimit = await consumeRateLimit({
+    key: `stripe-checkout:account:${session.email.trim().toLowerCase()}`,
+    limit: 8,
+    windowMs: 60_000,
+  });
+  if (accountRateLimit.unavailable) {
+    return checkoutError(errorCopy.unavailable, 503, {
+      "Retry-After": String(accountRateLimit.retryAfterSeconds),
+    });
+  }
+  if (!accountRateLimit.allowed) {
+    return checkoutError(errorCopy.rateLimit, 429, {
+      "Retry-After": String(accountRateLimit.retryAfterSeconds),
+    });
   }
 
   if (!isStripeEmbeddedConfigured()) {

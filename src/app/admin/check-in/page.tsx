@@ -9,7 +9,6 @@ import {
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { isAdminSession } from "@/lib/auth";
-import { getEventById, isTestSimulationEvent } from "@/lib/event";
 import { getLocale, localizeHref } from "@/lib/i18n";
 import { getTicket } from "@/lib/store";
 
@@ -44,8 +43,22 @@ export default async function CheckInPage({
 
   const ticket = id ? await getTicket(id) : null;
   const secretMatches = Boolean(ticket && ticket.qrSecret === secret);
-  const event = ticket ? getEventById(ticket.eventId) : undefined;
-  const testSimulation = Boolean(event && isTestSimulationEvent(event));
+  const testSimulation =
+    ticket?.purchaseSnapshot?.offerKind === "test-simulation";
+  const admissionTicket =
+    ticket?.purchaseSnapshot?.offerKind === "admission";
+  const successfulCheckIn =
+    status === "success" && ticket?.status === "checked_in";
+  const alreadyUsed =
+    status === "already-used" && ticket?.status === "checked_in";
+  const verifiedTestTicket =
+    status === "test-ticket" &&
+    ticket?.purchaseSnapshot?.offerKind === "test-simulation";
+  const hasTrustedStatus =
+    successfulCheckIn ||
+    alreadyUsed ||
+    verifiedTestTicket ||
+    status === "invalid";
 
   return (
     <main className="min-h-screen bg-slate-100 px-4 py-8 text-slate-950">
@@ -70,22 +83,28 @@ export default async function CheckInPage({
           </div>
 
           <div className="p-6">
-            {status === "success" && (
+            {successfulCheckIn && (
               <StatusBox tone="success" icon={<CheckCircle2 size={20} />}>
                 Check-in е успешен. Билетът вече е маркиран като използван.
               </StatusBox>
             )}
-            {status === "already-used" && (
+            {alreadyUsed && (
               <StatusBox tone="warning" icon={<AlertTriangle size={20} />}>
                 Този билет вече е бил използван.
               </StatusBox>
             )}
-            {(status === "test-ticket" ||
+            {(verifiedTestTicket ||
               (ticket && secretMatches && testSimulation)) && (
               <StatusBox tone="info" icon={<ShieldCheck size={20} />}>
                 QR кодът потвърждава Tiketko Stripe тестова покупка. Този
                 PDF не е валиден за вход в събитието и не може да бъде
                 маркиран като използван.
+              </StatusBox>
+            )}
+            {ticket && secretMatches && !ticket.purchaseSnapshot && (
+              <StatusBox tone="danger" icon={<AlertTriangle size={20} />}>
+                Този стар билет няма надежден snapshot на покупката и не може
+                да бъде допуснат за check-in.
               </StatusBox>
             )}
             {!id && (
@@ -95,7 +114,8 @@ export default async function CheckInPage({
                 покажат тук за потвърждение.
               </StatusBox>
             )}
-            {(status === "invalid" || (id && (!ticket || !secretMatches))) && (
+            {(status === "invalid" ||
+              (id && !hasTrustedStatus && (!ticket || !secretMatches))) && (
               <StatusBox tone="danger" icon={<AlertTriangle size={20} />}>
                 Билетът или кодът за проверка е невалиден.
               </StatusBox>
@@ -113,6 +133,8 @@ export default async function CheckInPage({
                     value={
                       testSimulation
                         ? "Stripe тест - без право на вход"
+                        : !admissionTicket
+                        ? "Непотвърден стар билет"
                         : ticket.status === "checked_in"
                         ? "Вече използван"
                         : "Валиден"
@@ -122,7 +144,7 @@ export default async function CheckInPage({
 
                 {ticket.status === "issued" &&
                   status !== "success" &&
-                  !testSimulation && (
+                  admissionTicket && (
                   <form
                     action={`/api/tickets/${ticket.id}/verify`}
                     method="post"

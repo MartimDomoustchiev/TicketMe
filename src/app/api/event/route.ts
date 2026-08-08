@@ -10,6 +10,9 @@ export const dynamic = "force-dynamic";
 
 export async function GET(request: Request) {
   const requestedId = new URL(request.url).searchParams.get("eventId");
+  if (requestedId && requestedId.length > 200) {
+    return Response.json({ error: "Event not found" }, { status: 404 });
+  }
   const event = requestedId
     ? await findCatalogEventById(requestedId)
     : EVENT;
