@@ -97,20 +97,254 @@ function parameterText(value: unknown): string | undefined {
   return undefined;
 }
 
+const BASIC_HTML_ENTITIES: ReadonlyMap<string, string> = new Map([
+  ["amp", "&"],
+  ["apos", "'"],
+  ["gt", ">"],
+  ["lt", "<"],
+  ["nbsp", " "],
+  ["quot", '"'],
+]);
+
+const MAX_HTML_ENTITY_LENGTH = 16;
+
+type MarkupToken = {
+  closing: boolean;
+  end: number;
+  selfClosing: boolean;
+  tagName: string | null;
+};
+
+function isAsciiDigit(character: string, radix: 10 | 16): boolean {
+  const code = character.charCodeAt(0);
+  if (code >= 48 && code <= 57) {
+    return true;
+  }
+  return (
+    radix === 16 &&
+    ((code >= 65 && code <= 70) || (code >= 97 && code <= 102))
+  );
+}
+
+function decodeEntityBody(body: string): string | null {
+  const named = BASIC_HTML_ENTITIES.get(body.toLowerCase());
+  if (named !== undefined) {
+    return named;
+  }
+
+  if (!body.startsWith("#")) {
+    return null;
+  }
+
+  const hexadecimal = body[1]?.toLowerCase() === "x";
+  const radix = hexadecimal ? 16 : 10;
+  const digits = body.slice(hexadecimal ? 2 : 1);
+  if (!digits || ![...digits].every((character) => isAsciiDigit(character, radix))) {
+    return null;
+  }
+
+  const codePoint = Number.parseInt(digits, radix);
+  if (
+    !Number.isSafeInteger(codePoint) ||
+    codePoint <= 0 ||
+    codePoint > 0x10ffff ||
+    (codePoint >= 0xd800 && codePoint <= 0xdfff)
+  ) {
+    return null;
+  }
+
+  return String.fromCodePoint(codePoint);
+}
+
 function decodeBasicEntities(value: string): string {
-  return value
-    .replace(/&#x([0-9a-f]+);/giu, (_, hex: string) =>
-      String.fromCodePoint(Number.parseInt(hex, 16)),
-    )
-    .replace(/&#([0-9]+);/gu, (_, decimal: string) =>
-      String.fromCodePoint(Number.parseInt(decimal, 10)),
-    )
-    .replace(/&nbsp;/giu, " ")
-    .replace(/&amp;/giu, "&")
-    .replace(/&lt;/giu, "<")
-    .replace(/&gt;/giu, ">")
-    .replace(/&quot;/giu, '"')
-    .replace(/&apos;/giu, "'");
+  const decoded: string[] = [];
+
+  for (let index = 0; index < value.length; index += 1) {
+    if (value[index] !== "&") {
+      decoded.push(value[index]);
+      continue;
+    }
+
+    let semicolon = -1;
+    for (
+      let cursor = index + 1;
+      cursor < value.length && cursor - index <= MAX_HTML_ENTITY_LENGTH;
+      cursor += 1
+    ) {
+      if (value[cursor] === ";") {
+        semicolon = cursor;
+        break;
+      }
+      if (value[cursor] === "&") {
+        break;
+      }
+    }
+
+    if (semicolon < 0) {
+      decoded.push("&");
+      continue;
+    }
+
+    const entity = decodeEntityBody(value.slice(index + 1, semicolon));
+    if (entity === null) {
+      decoded.push("&");
+      continue;
+    }
+
+    decoded.push(entity);
+    index = semicolon;
+  }
+
+  return decoded.join("");
+}
+
+function isMarkupWhitespace(character: string): boolean {
+  return (
+    character === " " ||
+    character === "\t" ||
+    character === "\n" ||
+    character === "\r" ||
+    character === "\f"
+  );
+}
+
+function isTagNameCharacter(character: string): boolean {
+  const code = character.charCodeAt(0);
+  return (
+    (code >= 48 && code <= 57) ||
+    (code >= 65 && code <= 90) ||
+    (code >= 97 && code <= 122) ||
+    character === ":" ||
+    character === "-" ||
+    character === "_"
+  );
+}
+
+function markupDeclarationToken(value: string, start: number): MarkupToken {
+  const comment = value.startsWith("<!--", start);
+  const marker = comment ? "-->" : ">";
+  const markerStart = value.indexOf(marker, start + (comment ? 4 : 2));
+
+  return {
+    closing: false,
+    end: markerStart < 0 ? value.length : markerStart + marker.length,
+    selfClosing: false,
+    tagName: null,
+  };
+}
+
+function readMarkupToken(value: string, start: number): MarkupToken | null {
+  if (value[start] !== "<") {
+    return null;
+  }
+  if (value[start + 1] === "!" || value[start + 1] === "?") {
+    return markupDeclarationToken(value, start);
+  }
+
+  let cursor = start + 1;
+  while (isMarkupWhitespace(value[cursor] ?? "")) {
+    cursor += 1;
+  }
+
+  const closing = value[cursor] === "/";
+  if (closing) {
+    cursor += 1;
+    while (isMarkupWhitespace(value[cursor] ?? "")) {
+      cursor += 1;
+    }
+  }
+
+  const nameStart = cursor;
+  while (isTagNameCharacter(value[cursor] ?? "")) {
+    cursor += 1;
+  }
+  if (cursor === nameStart) {
+    return null;
+  }
+
+  const tagName = value.slice(nameStart, cursor).toLowerCase();
+  let quote: '"' | "'" | null = null;
+  for (; cursor < value.length; cursor += 1) {
+    const character = value[cursor];
+    if (quote) {
+      if (character === quote) {
+        quote = null;
+      }
+      continue;
+    }
+    if (character === '"' || character === "'") {
+      quote = character;
+      continue;
+    }
+    if (character !== ">") {
+      continue;
+    }
+
+    let beforeEnd = cursor - 1;
+    while (isMarkupWhitespace(value[beforeEnd] ?? "")) {
+      beforeEnd -= 1;
+    }
+    return {
+      closing,
+      end: cursor + 1,
+      selfClosing: value[beforeEnd] === "/",
+      tagName,
+    };
+  }
+
+  // A syntactically tag-like token that reaches EOF is discarded as one
+  // bounded unit. Returning null would make the outer scanner retry the same
+  // unterminated suffix at every subsequent "<", producing quadratic work.
+  return {
+    closing,
+    end: value.length,
+    selfClosing: false,
+    tagName,
+  };
+}
+
+function textWithoutMarkup(value: string): string {
+  const text: string[] = [];
+  let suppressedTag: "script" | "style" | null = null;
+
+  for (let index = 0; index < value.length; ) {
+    if (value[index] !== "<") {
+      if (!suppressedTag) {
+        text.push(value[index]);
+      }
+      index += 1;
+      continue;
+    }
+
+    const token = readMarkupToken(value, index);
+    if (!token) {
+      if (!suppressedTag) {
+        text.push("<");
+      }
+      index += 1;
+      continue;
+    }
+
+    index = token.end;
+    if (suppressedTag) {
+      if (token.closing && token.tagName === suppressedTag) {
+        suppressedTag = null;
+        text.push(" ");
+      }
+      continue;
+    }
+
+    if (
+      !token.closing &&
+      !token.selfClosing &&
+      (token.tagName === "script" || token.tagName === "style")
+    ) {
+      suppressedTag = token.tagName;
+    }
+    text.push(" ");
+  }
+
+  return text.join("");
 }
 
 function cleanText(
@@ -122,10 +356,7 @@ function cleanText(
     return undefined;
   }
 
-  const text = decodeBasicEntities(raw)
-    .replace(/<script\b[^>]*>[\s\S]*?<\/script>/giu, " ")
-    .replace(/<style\b[^>]*>[\s\S]*?<\/style>/giu, " ")
-    .replace(/<[^>]+>/gu, " ")
+  const text = textWithoutMarkup(decodeBasicEntities(raw))
     .replace(/\p{C}+/gu, " ")
     .replace(/\s+/gu, " ")
     .trim();
