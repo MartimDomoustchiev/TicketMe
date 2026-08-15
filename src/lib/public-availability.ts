@@ -7,6 +7,7 @@ import {
   getPurchaseActivity,
 } from "@/lib/store";
 import { singleFlight } from "@/lib/single-flight";
+import { retryTransientPostgresRead } from "@/lib/transient-postgres-read";
 
 type AvailabilityLoader = (eventId: string) => Promise<Availability>;
 type PurchaseActivityLoader = (
@@ -21,7 +22,10 @@ const loadSharedAvailability = unstable_cache(
   async (eventId: string) =>
     singleFlight(
       `database-availability:${eventId}`,
-      () => getAvailability(eventId),
+      () =>
+        retryTransientPostgresRead("availability", () =>
+          getAvailability(eventId),
+        ),
     ),
   ["ticketme-public-availability-v1"],
   { revalidate: 2, tags: ["ticketme-public-ticketing"] },
@@ -31,7 +35,10 @@ const loadSharedPurchaseActivity = unstable_cache(
   async (eventId: string) =>
     singleFlight(
       `database-purchase-activity:${eventId}`,
-      () => getPurchaseActivity(eventId),
+      () =>
+        retryTransientPostgresRead("purchase-activity", () =>
+          getPurchaseActivity(eventId),
+        ),
     ),
   ["ticketme-public-purchase-activity-v1"],
   { revalidate: 2, tags: ["ticketme-public-ticketing"] },

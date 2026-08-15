@@ -1,4 +1,5 @@
 import { createHash, timingSafeEqual } from "node:crypto";
+import { invalidatePublicCatalogCache } from "@/lib/catalog-cache";
 import { runEventDiscovery } from "@/lib/event-discovery";
 
 export const runtime = "nodejs";
@@ -81,6 +82,9 @@ async function handleDiscovery(request: Request): Promise<Response> {
   } catch (error) {
     console.error("Scheduled event discovery failed.", error);
     return jsonResponse({ error: "Event discovery failed." }, 500);
+  } finally {
+    // A failed run may still have committed earlier source/event updates.
+    invalidatePublicCatalogCache();
   }
 }
 

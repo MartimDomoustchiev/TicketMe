@@ -33,6 +33,7 @@ type Props = {
   event: CatalogEvent;
   checkoutEnabled: boolean;
   availabilityAvailable: boolean;
+  paymentMode: "test" | "live" | null;
   locale: "bg" | "en";
 };
 
@@ -64,6 +65,8 @@ const COPY = {
     testOffer: "Tiketko Stripe test оферта",
     testNotice:
       "Това е тестово плащане без реално таксуване. PDF билетът не е валиден за вход, а наличността не е официалната наличност на организатора.",
+    admissionTestNotice:
+      "Stripe test mode: няма реално таксуване. Завършването на плащането издава този Tiketko билет за вход за целите на проекта.",
     sourceLink: (source: string) => `Източник на събитието: ${source}`,
   },
   en: {
@@ -93,6 +96,8 @@ const COPY = {
     testOffer: "Tiketko Stripe test offer",
     testNotice:
       "This is a test payment with no real charge. The PDF ticket is not valid for venue entry, and these counts are not the organizer's official inventory.",
+    admissionTestNotice:
+      "Stripe test mode: no real money is charged. Completing checkout issues this Tiketko admission ticket for this project.",
     sourceLink: (source: string) => `Event source: ${source}`,
   },
 } as const;
@@ -113,6 +118,7 @@ export function EventPurchasePanel({
   event,
   checkoutEnabled,
   availabilityAvailable,
+  paymentMode,
   locale,
 }: Props) {
   const [countdown, setCountdown] = useState<Countdown | null>(null);
@@ -123,6 +129,7 @@ export function EventPurchasePanel({
   const remaining = availability?.totalRemaining ?? 0;
   const soldOut = availabilityAvailable && remaining <= 0;
   const testSimulation = isTestSimulationEvent(event);
+  const testPaymentMode = paymentMode === "test";
   const sourceSellsTickets = event.sourceSellsTickets === true;
   const checkoutPrice = event.ticketTypes.reduce(
     (lowest, ticketType) => Math.min(lowest, ticketType.price),
@@ -267,7 +274,9 @@ export function EventPurchasePanel({
         {checkoutEnabled
           ? testSimulation
             ? copy.testNotice
-            : copy.secureVerified
+            : testPaymentMode
+              ? copy.admissionTestNotice
+              : copy.secureVerified
           : sourceSellsTickets
             ? copy.externalSource(event.sourceName)
             : copy.attributedSource(event.sourceName)}

@@ -1,4 +1,5 @@
 import { getActiveAccount } from "@/lib/auth";
+import { invalidatePublicCatalogCache } from "@/lib/catalog-cache";
 import {
   publishCatalogEvent,
   rejectCatalogEvent,
@@ -72,5 +73,11 @@ export async function POST(request: Request) {
   } catch (error) {
     console.error("Event discovery review failed.", error);
     return json({ error: "Review could not be saved." }, 503);
+  } finally {
+    // A publish can commit before a follow-up read or response fails. Always
+    // attempt invalidation so a retry/no-op still repairs public cache state.
+    if (body.action === "publish") {
+      invalidatePublicCatalogCache();
+    }
   }
 }

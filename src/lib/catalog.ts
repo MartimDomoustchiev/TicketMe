@@ -19,16 +19,21 @@ import {
   canPreserveTicketSellerClaim,
   type CatalogEventRecord,
 } from "@/lib/catalog-types";
+import { PUBLIC_CATALOG_CACHE_TAG } from "@/lib/catalog-cache";
 import { isDatabaseConfigured } from "@/lib/database";
 import { singleFlight } from "@/lib/single-flight";
+import { retryTransientPostgresRead } from "@/lib/transient-postgres-read";
 
-export const PUBLIC_CATALOG_CACHE_TAG = "ticketme-public-catalog";
-
-const PUBLIC_CATALOG_CACHE_REVALIDATE_SECONDS = 30;
+const PUBLIC_CATALOG_CACHE_REVALIDATE_SECONDS = 15 * 60;
 const publicCatalogCacheOptions = {
+  // Route handlers invalidate immediately after catalog mutations. This
+  // bounded fallback prevents permanent staleness if a process exits after a
+  // database commit but before the cache invalidation reaches Next's store.
   revalidate: PUBLIC_CATALOG_CACHE_REVALIDATE_SECONDS,
   tags: [PUBLIC_CATALOG_CACHE_TAG],
 };
+
+export { PUBLIC_CATALOG_CACHE_TAG } from "@/lib/catalog-cache";
 
 /**
  * Async catalogue boundary. The static seed catalogue remains a dependable
@@ -86,7 +91,13 @@ async function loadPublishedDiscoveries(): Promise<CatalogEventRecord[]> {
 }
 
 const loadCachedPublishedDiscoveries = unstable_cache(
-  () => singleFlight("database-catalog:list", loadPublishedDiscoveries),
+  () =>
+    singleFlight("database-catalog:list", () =>
+      retryTransientPostgresRead(
+        "catalog-list",
+        loadPublishedDiscoveries,
+      ),
+    ),
   ["ticketme-public-catalog-list-v1"],
   publicCatalogCacheOptions,
 );
@@ -95,7 +106,10 @@ const getCachedPublishedCatalogEventById = unstable_cache(
   async (id: string) =>
     singleFlight(
       `database-catalog:id:${id}`,
-      () => getPublishedCatalogEventById(id),
+      () =>
+        retryTransientPostgresRead("catalog-id", () =>
+          getPublishedCatalogEventById(id),
+        ),
     ),
   ["ticketme-public-catalog-event-by-id-v1"],
   publicCatalogCacheOptions,
@@ -105,7 +119,10 @@ const getCachedPublishedCatalogEventBySlug = unstable_cache(
   async (slug: string) =>
     singleFlight(
       `database-catalog:slug:${slug}`,
-      () => getPublishedCatalogEventBySlug(slug),
+      () =>
+        retryTransientPostgresRead("catalog-slug", () =>
+          getPublishedCatalogEventBySlug(slug),
+        ),
     ),
   ["ticketme-public-catalog-event-by-slug-v1"],
   publicCatalogCacheOptions,
