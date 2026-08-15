@@ -34,7 +34,7 @@ import {
   listRelatedCatalogEvents,
 } from "@/lib/catalog";
 import {
-  isEventOpenForInternalSale,
+  isEventOpenForTicketMeCheckout,
   isTestSimulationEvent,
 } from "@/lib/event";
 import { getLocale, localizeHref } from "@/lib/i18n";
@@ -86,7 +86,7 @@ export default async function EventPage({ params }: EventPageProps) {
     notFound();
   }
 
-  const checkoutEnabled = isEventOpenForInternalSale(event);
+  const checkoutEnabled = isEventOpenForTicketMeCheckout(event);
   const testSimulation = isTestSimulationEvent(event);
   const visual = getEventVisual(event);
   const [
