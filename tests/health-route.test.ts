@@ -17,6 +17,7 @@ test("public health response exposes status only and caches its probe", async ()
     "checks:",
     "databaseReachable:",
     "databaseSchemaReady:",
+    "runtimePrivilegesReady:",
     "databaseTls:",
     "paymentMode:",
     "fulfillmentMode:",

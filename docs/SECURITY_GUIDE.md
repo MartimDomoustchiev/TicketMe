@@ -340,6 +340,12 @@ GRANT UPDATE ON TABLE
   public.request_rate_limits
 TO "<APP_RUNTIME_ROLE>";
 
+-- SELECT ... FOR UPDATE изисква UPDATE върху поне една колона. Използвай
+-- неидентифицираща operational колона вместо table-wide UPDATE.
+REVOKE UPDATE ON TABLE public.purchase_queue FROM "<APP_RUNTIME_ROLE>";
+GRANT UPDATE (enqueued_at) ON TABLE public.purchase_queue
+TO "<APP_RUNTIME_ROLE>";
+
 GRANT DELETE ON TABLE
   public.verification_tokens,
   public.tickets,
@@ -410,19 +416,59 @@ SELECT
   has_schema_privilege(current_user, 'public', 'USAGE') AS schema_usage,
   has_schema_privilege(current_user, 'public', 'CREATE') AS schema_create,
   has_table_privilege(
+    current_user, 'public.request_rate_limits', 'SELECT'
+  )
+    AND has_table_privilege(
+      current_user, 'public.request_rate_limits', 'INSERT'
+    )
+    AND has_table_privilege(
+      current_user, 'public.request_rate_limits', 'UPDATE'
+    )
+    AND has_table_privilege(
+      current_user, 'public.request_rate_limits', 'DELETE'
+    ) AS rate_limit_dml,
+  has_table_privilege(current_user, 'public.purchase_queue', 'SELECT')
+    AND has_table_privilege(
+      current_user, 'public.purchase_queue', 'INSERT'
+    )
+    AND has_table_privilege(
+      current_user, 'public.purchase_queue', 'DELETE'
+    ) AS queue_dml,
+  has_column_privilege(
     current_user,
-    'public.request_rate_limits',
-    'SELECT,INSERT,UPDATE,DELETE'
-  ) AS rate_limit_dml,
+    'public.purchase_queue',
+    'enqueued_at',
+    'UPDATE'
+  ) AS queue_lock_update,
   has_sequence_privilege(
     current_user,
     'public.purchase_queue_position_seq',
     'USAGE'
-  ) AS queue_sequence_usage;
+  ) AS queue_sequence_usage,
+  has_sequence_privilege(
+    current_user,
+    'public.catalog_event_sources_id_seq',
+    'USAGE'
+  ) AS catalog_source_sequence_usage;
 ```
 
 Очаквано: `schema_usage=true`, `schema_create=false`, останалите показани runtime
 права `true`. Добави regression check за всяка бъдеща таблица/sequence.
+
+`purchase_queue` изисква `UPDATE`, въпреки че приложението не изпълнява директен
+`UPDATE` върху таблицата: PostgreSQL изисква това право за използвания
+`SELECT ... FOR UPDATE`. След промяна на ролите изпълни и zero-row smoke test,
+който проверява ACL без да заключва или променя редове:
+
+```sql
+BEGIN;
+SET LOCAL ROLE "<APP_RUNTIME_ROLE>";
+SELECT request_id
+FROM public.purchase_queue
+WHERE FALSE
+FOR UPDATE;
+ROLLBACK;
+```
 
 ### 6.5 Backups, encryption и monitoring
 
