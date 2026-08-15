@@ -71,14 +71,25 @@ const nextConfig: NextConfig = {
           },
         ],
       },
+      // Form pages need an origin signal for CSRF validation. `strict-origin`
+      // preserves only that origin and never exposes a token-bearing path.
       ...[
-        "/:locale(bg|en)/verify",
-        "/:locale(bg|en)/admin/check-in",
-        "/api/tickets/:id/verify",
-      ].map((source) => ({
+        {
+          source: "/:locale(bg|en)/verify",
+          referrerPolicy: "strict-origin",
+        },
+        {
+          source: "/:locale(bg|en)/admin/check-in",
+          referrerPolicy: "strict-origin",
+        },
+        {
+          source: "/api/tickets/:id/verify",
+          referrerPolicy: "no-referrer",
+        },
+      ].map(({ source, referrerPolicy }) => ({
         source,
         headers: [
-          { key: "Referrer-Policy", value: "no-referrer" },
+          { key: "Referrer-Policy", value: referrerPolicy },
           { key: "Cache-Control", value: "private, no-store" },
           { key: "X-Robots-Tag", value: "noindex, nofollow" },
         ],

@@ -1,11 +1,34 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import nextConfig from "../next.config";
 import { enqueuePurchase } from "../src/lib/queue";
 import {
   isPublicHttpsBaseUrl,
   resolvePublicBaseUrl,
   safeReturnPath,
 } from "../src/lib/site";
+
+test("sensitive form pages preserve origin-only CSRF provenance", async () => {
+  assert.ok(nextConfig.headers);
+  const rules = await nextConfig.headers();
+  const referrerPolicyFor = (source: string) =>
+    rules
+      .find((rule) => rule.source === source)
+      ?.headers.find((header) => header.key === "Referrer-Policy")?.value;
+
+  assert.equal(
+    referrerPolicyFor("/:locale(bg|en)/verify"),
+    "strict-origin",
+  );
+  assert.equal(
+    referrerPolicyFor("/:locale(bg|en)/admin/check-in"),
+    "strict-origin",
+  );
+  assert.equal(
+    referrerPolicyFor("/api/tickets/:id/verify"),
+    "no-referrer",
+  );
+});
 
 test("safeReturnPath permits local destinations and rejects open redirects", () => {
   assert.equal(
