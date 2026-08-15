@@ -515,7 +515,7 @@ PostgreSQL през `DATABASE_URL`, когато той е конфигурир�
 
 | Променлива | Production | Предназначение |
 | --- | --- | --- |
-| `NEXT_PUBLIC_APP_URL` | задължителна | Каноничен HTTPS origin за email и QR линкове. |
+| `NEXT_PUBLIC_APP_URL` | задължителна | Каноничен HTTPS origin за email и QR линкове; в production използвай точно `https://www.tiketko.top`. |
 | `DATABASE_URL` | production: задължителна, освен при отделни DB полета | PostgreSQL connection string за users, sessions, inventory и queue. |
 | `DATABASE_HOST`, `DATABASE_PORT`, `DATABASE_NAME`, `DATABASE_USER`, `DATABASE_PASSWORD` | алтернатива на `DATABASE_URL` | Отделни PostgreSQL connection полета с безопасно password encoding. |
 | `DATABASE_SSL_CA_PATH`, `DATABASE_SSL_CA_BASE64`, `DATABASE_SSL_CA` | AWS RDS: едно е задължително | AWS RDS CA bundle за verified TLS. |

@@ -187,6 +187,134 @@ test("state-changing form requests enforce their origin", () => {
   assert.equal(isSameOriginRequest(missingProvenance), false);
 });
 
+test("canonical redirects preserve trusted form provenance without weakening CSRF", () => {
+  const request = (headers: Record<string, string>, host = "www.tiketko.top") =>
+    new Request(`https://${host}/api/session`, {
+      method: "POST",
+      headers: { host, ...headers },
+    });
+
+  assert.equal(
+    isSameOriginRequest(
+      request({
+        origin: "https://tiketko.top",
+        "sec-fetch-site": "same-site",
+      }),
+    ),
+    true,
+  );
+  assert.equal(
+    isSameOriginRequest(
+      request({
+        origin: "null",
+        referer: "https://tiketko.top/bg/login",
+        "sec-fetch-site": "same-site",
+      }),
+    ),
+    true,
+  );
+
+  for (const untrustedOrigin of [
+    "https://shop.tiketko.top",
+    "https://tiketko.top.evil.example",
+    "http://tiketko.top",
+    "https://tiketko.top:444",
+    "not a valid origin",
+  ]) {
+    assert.equal(
+      isSameOriginRequest(
+        request({
+          origin: untrustedOrigin,
+          "sec-fetch-site": "same-site",
+        }),
+      ),
+      false,
+    );
+  }
+
+  assert.equal(
+    isSameOriginRequest(
+      request({
+        origin: "https://evil.example",
+        referer: "https://tiketko.top/bg/login",
+        "sec-fetch-site": "same-site",
+      }),
+    ),
+    false,
+  );
+  assert.equal(
+    isSameOriginRequest(
+      request({
+        origin: "null",
+        referer: "https://evil.example/login",
+        "sec-fetch-site": "same-site",
+      }),
+    ),
+    false,
+  );
+  assert.equal(
+    isSameOriginRequest(
+      request(
+        {
+          origin: "https://tiketko.top",
+          "sec-fetch-site": "same-site",
+        },
+        "preview.tiketko.top",
+      ),
+    ),
+    false,
+  );
+  assert.equal(
+    isSameOriginRequest(
+      request({
+        origin: "https://tiketko.top",
+        "sec-fetch-site": "cross-site",
+      }),
+    ),
+    false,
+  );
+  assert.equal(
+    isSameOriginRequest(
+      request(
+        {
+          origin: "https://www.tiketko.top",
+          "sec-fetch-site": "same-site",
+        },
+        "tiketko.top",
+      ),
+    ),
+    false,
+  );
+});
+
+test("session accepts an apex form POST replayed on the canonical host", async () => {
+  const response = await sessionPost(
+    new Request("https://www.tiketko.top/api/session", {
+      method: "POST",
+      headers: {
+        "content-type": "application/x-www-form-urlencoded",
+        host: "www.tiketko.top",
+        origin: "null",
+        referer: "https://tiketko.top/bg/login",
+        "sec-fetch-site": "same-site",
+      },
+      body: new URLSearchParams({
+        intent: "login",
+        locale: "bg",
+        email: "not-an-email",
+        password: "SecretPassword9",
+        next: "/bg/events",
+      }),
+    }),
+  );
+
+  assert.equal(response.status, 303);
+  const location = new URL(response.headers.get("location")!);
+  assert.equal(location.origin, "https://www.tiketko.top");
+  assert.equal(location.pathname, "/bg/login");
+  assert.equal(location.searchParams.get("error"), "email");
+});
+
 test("session form outcomes use 303 so credentials are never reposted", async () => {
   const response = await sessionPost(
     new Request("https://tickets.example/api/session", {
