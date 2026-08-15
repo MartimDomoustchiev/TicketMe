@@ -3,17 +3,30 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
 import {
+  assertDatabaseSchema,
   createDatabaseClient,
+  databaseSchemaStatus,
   databaseSql,
   databaseAutoMigrateEnabled,
   isDatabaseConfigured,
   resolveDatabaseConnection,
+  type SqlClient,
 } from "../src/lib/database";
 
 const TEST_CA =
   "-----BEGIN CERTIFICATE-----\nTEST\n-----END CERTIFICATE-----";
 const RDS_HOST =
   "ticket-db.placeholder.eu-central-1.rds.amazonaws.com";
+
+function statusClient(
+  row: Record<string, unknown>,
+  queries: string[] = [],
+): SqlClient {
+  return ((strings: TemplateStringsArray) => {
+    queries.push(strings.join(""));
+    return Promise.resolve([row]);
+  }) as unknown as SqlClient;
+}
 
 test("AWS RDS uses one verified TLS pool configuration", () => {
   const connection = resolveDatabaseConnection({
@@ -111,6 +124,104 @@ test("checkout fairness migration allows one active hold per buyer and event", a
     migration,
     /WHERE status IN \('reserved', 'checkout_created'\)/,
   );
+});
+
+test("database readiness requires schema objects and runtime privileges", async () => {
+  const queries: string[] = [];
+  const ready = await databaseSchemaStatus(
+    statusClient(
+      {
+        runtime_privileges_ready: true,
+        schema_ready: true,
+        tls: true,
+      },
+      queries,
+    ),
+  );
+
+  assert.deepEqual(ready, {
+    ready: true,
+    runtimePrivilegesReady: true,
+    schemaReady: true,
+    tls: true,
+  });
+  assert.equal(queries.length, 1);
+  assert.match(queries[0], /SELECT bool_and\(/);
+  assert.doesNotMatch(queries[0], /'SELECT,INSERT/);
+  assert.match(
+    queries[0],
+    /has_column_privilege[\s\S]*purchase_queue[\s\S]*enqueued_at[\s\S]*UPDATE/,
+  );
+  assert.match(queries[0], /purchase_queue_position_seq/);
+  assert.match(queries[0], /catalog_event_sources_id_seq/);
+
+  const missingQueueLockPrivilege = await databaseSchemaStatus(
+    statusClient({
+      runtime_privileges_ready: false,
+      schema_ready: true,
+      tls: true,
+    }),
+  );
+  assert.deepEqual(missingQueueLockPrivilege, {
+    ready: false,
+    runtimePrivilegesReady: false,
+    schemaReady: true,
+    tls: true,
+  });
+
+  await assert.rejects(
+    assertDatabaseSchema(
+      statusClient({
+        runtime_privileges_ready: true,
+        schema_ready: false,
+        tls: true,
+      }),
+    ),
+    /schema is not ready/,
+  );
+  await assert.rejects(
+    assertDatabaseSchema(
+      statusClient({
+        runtime_privileges_ready: false,
+        schema_ready: true,
+        tls: true,
+      }),
+    ),
+    /runtime role lacks required privileges/,
+  );
+});
+
+test("runtime role guide includes the queue lock grant and smoke test", async () => {
+  const [guide, checkScript] = await Promise.all([
+    readFile(
+      path.join(process.cwd(), "docs", "SECURITY_GUIDE.md"),
+      "utf8",
+    ),
+    readFile(
+      path.join(process.cwd(), "scripts", "check-database.ts"),
+      "utf8",
+    ),
+  ]);
+  const updateGrant = guide.match(
+    /GRANT UPDATE ON TABLE[\s\S]*?TO "<APP_RUNTIME_ROLE>";/,
+  )?.[0];
+
+  assert.ok(updateGrant);
+  assert.doesNotMatch(updateGrant, /public\.purchase_queue/);
+  assert.match(
+    guide,
+    /REVOKE UPDATE ON TABLE public\.purchase_queue FROM "<APP_RUNTIME_ROLE>";/,
+  );
+  assert.match(
+    guide,
+    /GRANT UPDATE \(enqueued_at\) ON TABLE public\.purchase_queue[\s\S]*?TO "<APP_RUNTIME_ROLE>";/,
+  );
+  assert.match(
+    guide,
+    /SELECT request_id[\s\S]*FROM public\.purchase_queue[\s\S]*WHERE FALSE[\s\S]*FOR UPDATE/,
+  );
+  assert.match(checkScript, /runtimePrivilegesReady/);
+  assert.match(checkScript, /schemaReady: status\.schemaReady/);
 });
 
 test("Cloudflare creates isolated single-connection clients", async () => {

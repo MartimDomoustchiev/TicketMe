@@ -334,58 +334,138 @@ export function databaseAutoMigrateEnabled(
 
 export async function databaseSchemaStatus(
   client: SqlClient = databaseSql(),
-): Promise<{ ready: boolean; tls: boolean }> {
+): Promise<{
+  ready: boolean;
+  runtimePrivilegesReady: boolean;
+  schemaReady: boolean;
+  tls: boolean;
+}> {
   const rows = await client`
     SELECT
-      to_regclass('public.event_inventory') IS NOT NULL AS event_inventory,
-      to_regclass('public.verification_tokens') IS NOT NULL AS verification_tokens,
-      to_regclass('public.tickets') IS NOT NULL AS tickets,
-      to_regclass('public.purchase_queue') IS NOT NULL AS purchase_queue,
-      to_regclass('public.checkout_reservations') IS NOT NULL AS checkout_reservations,
-      to_regclass(
-        'public.checkout_reservations_active_buyer_event_idx'
-      ) IS NOT NULL AS checkout_reservations_active_buyer_event_idx,
-      to_regclass('public.audit_log') IS NOT NULL AS audit_log,
-      to_regclass('public.users') IS NOT NULL AS users,
-      to_regclass('public.auth_sessions') IS NOT NULL AS auth_sessions,
-      to_regclass('public.email_verification_tokens') IS NOT NULL AS email_verification_tokens,
-      to_regclass('public.catalog_events') IS NOT NULL AS catalog_events,
-      to_regclass('public.catalog_event_sources') IS NOT NULL AS catalog_event_sources,
-      to_regclass('public.event_discovery_runs') IS NOT NULL AS event_discovery_runs,
-      to_regclass('public.request_rate_limits') IS NOT NULL AS request_rate_limits,
+      (
+        to_regclass('public.event_inventory') IS NOT NULL
+        AND to_regclass('public.verification_tokens') IS NOT NULL
+        AND to_regclass('public.tickets') IS NOT NULL
+        AND to_regclass('public.purchase_queue') IS NOT NULL
+        AND to_regclass('public.purchase_queue_position_seq') IS NOT NULL
+        AND to_regclass('public.checkout_reservations') IS NOT NULL
+        AND to_regclass(
+          'public.checkout_reservations_active_buyer_event_idx'
+        ) IS NOT NULL
+        AND to_regclass('public.audit_log') IS NOT NULL
+        AND to_regclass('public.users') IS NOT NULL
+        AND to_regclass('public.auth_sessions') IS NOT NULL
+        AND to_regclass('public.email_verification_tokens') IS NOT NULL
+        AND to_regclass('public.catalog_events') IS NOT NULL
+        AND to_regclass('public.catalog_event_sources') IS NOT NULL
+        AND to_regclass('public.catalog_event_sources_id_seq') IS NOT NULL
+        AND to_regclass('public.event_discovery_runs') IS NOT NULL
+        AND to_regclass('public.request_rate_limits') IS NOT NULL
+      ) AS schema_ready,
+      (
+        has_schema_privilege(current_user, 'public', 'USAGE')
+        AND COALESCE(
+          (
+            SELECT bool_and(
+              has_table_privilege(
+                current_user,
+                to_regclass(required.table_name),
+                required.privilege
+              )
+            )
+            FROM (
+              VALUES
+                ('public.event_inventory', 'SELECT'),
+                ('public.event_inventory', 'INSERT'),
+                ('public.event_inventory', 'UPDATE'),
+                ('public.verification_tokens', 'SELECT'),
+                ('public.verification_tokens', 'INSERT'),
+                ('public.verification_tokens', 'DELETE'),
+                ('public.tickets', 'SELECT'),
+                ('public.tickets', 'INSERT'),
+                ('public.tickets', 'UPDATE'),
+                ('public.tickets', 'DELETE'),
+                ('public.purchase_queue', 'SELECT'),
+                ('public.purchase_queue', 'INSERT'),
+                ('public.purchase_queue', 'DELETE'),
+                ('public.checkout_reservations', 'SELECT'),
+                ('public.checkout_reservations', 'INSERT'),
+                ('public.checkout_reservations', 'UPDATE'),
+                ('public.audit_log', 'INSERT'),
+                ('public.users', 'SELECT'),
+                ('public.users', 'INSERT'),
+                ('public.users', 'UPDATE'),
+                ('public.auth_sessions', 'SELECT'),
+                ('public.auth_sessions', 'INSERT'),
+                ('public.auth_sessions', 'DELETE'),
+                ('public.email_verification_tokens', 'SELECT'),
+                ('public.email_verification_tokens', 'INSERT'),
+                ('public.email_verification_tokens', 'DELETE'),
+                ('public.catalog_events', 'SELECT'),
+                ('public.catalog_events', 'INSERT'),
+                ('public.catalog_events', 'UPDATE'),
+                ('public.catalog_event_sources', 'SELECT'),
+                ('public.catalog_event_sources', 'INSERT'),
+                ('public.catalog_event_sources', 'UPDATE'),
+                ('public.event_discovery_runs', 'SELECT'),
+                ('public.event_discovery_runs', 'INSERT'),
+                ('public.event_discovery_runs', 'UPDATE'),
+                ('public.request_rate_limits', 'SELECT'),
+                ('public.request_rate_limits', 'INSERT'),
+                ('public.request_rate_limits', 'UPDATE'),
+                ('public.request_rate_limits', 'DELETE')
+            ) AS required(table_name, privilege)
+          ),
+          FALSE
+        )
+        -- SELECT ... FOR UPDATE requires UPDATE privilege even though this
+        -- queue is never changed with an UPDATE statement.
+        AND has_column_privilege(
+          current_user,
+          to_regclass('public.purchase_queue'),
+          'enqueued_at',
+          'UPDATE'
+        )
+        AND has_sequence_privilege(
+          current_user,
+          to_regclass('public.purchase_queue_position_seq'),
+          'USAGE'
+        )
+        AND has_sequence_privilege(
+          current_user,
+          to_regclass('public.catalog_event_sources_id_seq'),
+          'USAGE'
+        )
+      ) AS runtime_privileges_ready,
       COALESCE(
         (SELECT ssl FROM pg_stat_ssl WHERE pid = pg_backend_pid()),
         FALSE
       ) AS tls
   `;
   const row = rows[0];
-  const ready = Boolean(
-    row?.event_inventory &&
-      row.verification_tokens &&
-      row.tickets &&
-      row.purchase_queue &&
-      row.checkout_reservations &&
-      row.checkout_reservations_active_buyer_event_idx &&
-      row.audit_log &&
-      row.users &&
-      row.auth_sessions &&
-      row.email_verification_tokens &&
-      row.catalog_events &&
-      row.catalog_event_sources &&
-      row.event_discovery_runs &&
-      row.request_rate_limits,
-  );
+  const schemaReady = Boolean(row?.schema_ready);
+  const runtimePrivilegesReady = Boolean(row?.runtime_privileges_ready);
 
-  return { ready, tls: Boolean(row?.tls) };
+  return {
+    ready: schemaReady && runtimePrivilegesReady,
+    runtimePrivilegesReady,
+    schemaReady,
+    tls: Boolean(row?.tls),
+  };
 }
 
 export async function assertDatabaseSchema(
   client: SqlClient = databaseSql(),
 ): Promise<void> {
   const status = await databaseSchemaStatus(client);
-  if (!status.ready) {
+  if (!status.schemaReady) {
     throw new Error(
       "The PostgreSQL schema is not ready. Run npm run db:migrate.",
+    );
+  }
+  if (!status.runtimePrivilegesReady) {
+    throw new Error(
+      "The PostgreSQL runtime role lacks required privileges. Apply the SECURITY_GUIDE grants.",
     );
   }
 }
