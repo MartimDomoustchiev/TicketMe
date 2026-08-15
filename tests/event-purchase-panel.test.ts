@@ -117,8 +117,12 @@ test("source-only listings keep URL-bound purchase claims", () => {
 });
 
 test("external test-event cards advertise the Tiketko simulation", () => {
+  const futureEvent = {
+    ...EVENT,
+    startsAt: "2099-09-29T20:00:00+03:00",
+  };
   const html = renderToStaticMarkup(
-    createElement(EventCard, { event: EVENT, locale: "en" }),
+    createElement(EventCard, { event: futureEvent, locale: "en" }),
   );
 
   assert.match(html, /Tiketko test offer/);
