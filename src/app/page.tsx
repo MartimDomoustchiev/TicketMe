@@ -27,7 +27,7 @@ import {
   EVENT_CATEGORIES,
   formatDualCurrencyPrice,
   getCategoryImage,
-  isEventOpenForInternalSale,
+  isEventOpenForTicketMeCheckout,
   isTestSimulationEvent,
   type EventCategory,
 } from "@/lib/event";
@@ -46,8 +46,8 @@ export default async function Home() {
   const copy = HOME_COPY[locale];
   const popularEvents = catalogEvents.toSorted(
     (left, right) =>
-      Number(isEventOpenForInternalSale(right)) -
-        Number(isEventOpenForInternalSale(left)) ||
+      Number(isEventOpenForTicketMeCheckout(right)) -
+        Number(isEventOpenForTicketMeCheckout(left)) ||
       Number(Boolean(right.featured)) - Number(Boolean(left.featured)) ||
       (right.bangerScore ?? 0) - (left.bangerScore ?? 0) ||
       eventTimestamp(left) - eventTimestamp(right),
@@ -55,7 +55,7 @@ export default async function Home() {
   const featuredEvents = popularEvents.slice(0, 8);
   const heroEvent = featuredEvents[0];
   const checkoutEnabled = heroEvent
-    ? isEventOpenForInternalSale(heroEvent)
+    ? isEventOpenForTicketMeCheckout(heroEvent)
     : false;
   const testSimulation = heroEvent
     ? isTestSimulationEvent(heroEvent)
@@ -165,7 +165,7 @@ export default async function Home() {
                 >
                   {availability
                     ? testSimulation
-                      ? copy.testPayment
+                      ? copy.buyTicketNow
                       : copy.chooseTickets
                     : copy.moreInformation}
                   <ArrowRight size={19} aria-hidden="true" />

@@ -1,7 +1,12 @@
 import { ArrowUpRight, ExternalLink, MapPin } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
-import { isEventOpenForInternalSale, type CatalogEvent } from "@/lib/event";
+import {
+  formatDualCurrencyPrice,
+  isEventOpenForTicketMeCheckout,
+  isTestSimulationEvent,
+  type CatalogEvent,
+} from "@/lib/event";
 import {
   categoryLabel,
   eventHref,
@@ -28,7 +33,14 @@ export function EventCard({
 }: EventCardProps) {
   const dictionary = getDictionary(locale);
   const visual = getEventVisual(event);
-  const checkoutEnabled = isEventOpenForInternalSale(event);
+  const checkoutEnabled = isEventOpenForTicketMeCheckout(event);
+  const testSimulation = isTestSimulationEvent(event);
+  const checkoutPrice = event.ticketTypes.reduce(
+    (lowest, ticketType) => Math.min(lowest, ticketType.price),
+    Number.POSITIVE_INFINITY,
+  );
+  const testOfferLabel =
+    locale === "en" ? "Tiketko test offer" : "Tiketko тестова оферта";
   const sourceLinkLabel =
     locale === "en" ? "Event source" : "Източник на събитието";
 
@@ -92,17 +104,21 @@ export function EventCard({
             <div className="mt-auto flex items-end justify-between gap-3 pt-5">
               <div>
                 <p className="text-xs font-bold uppercase tracking-wide text-slate-500">
-                  {checkoutEnabled
-                    ? dictionary.card.ticketsFrom
+                  {testSimulation
+                    ? testOfferLabel
                     : event.saleMode === "external"
                       ? externalSourceLabel(event, locale)
                       : dictionary.card.ticketsFrom}
                 </p>
                 <p className="mt-0.5 text-base font-black text-[#10172a]">
-                  {event.saleMode === "external" &&
-                  event.priceAvailable !== true
-                    ? event.sourceName
-                    : formatPrice(event, locale)}
+                  {testSimulation &&
+                  checkoutEnabled &&
+                  Number.isFinite(checkoutPrice)
+                    ? formatDualCurrencyPrice(checkoutPrice, locale)
+                    : event.saleMode === "external" &&
+                        event.priceAvailable !== true
+                      ? event.sourceName
+                      : formatPrice(event, locale)}
                 </p>
               </div>
               <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-slate-100 text-slate-600 transition group-hover:bg-[#2457ff] group-hover:text-white">
