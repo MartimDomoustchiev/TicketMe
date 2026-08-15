@@ -42,6 +42,7 @@ export default async function CheckInPage({
   }
 
   const ticket = id ? await getTicket(id) : null;
+  const copy = CHECK_IN_COPY[locale];
   const secretMatches = Boolean(ticket && ticket.qrSecret === secret);
   const testSimulation =
     ticket?.purchaseSnapshot?.offerKind === "test-simulation";
@@ -67,77 +68,77 @@ export default async function CheckInPage({
           href={localizeHref(locale, "/admin")}
           className="inline-flex items-center gap-2 text-sm font-bold text-slate-600 hover:text-slate-950"
         >
-          <ArrowLeft size={17} />
-          Към операционния панел
+          <ArrowLeft size={17} aria-hidden="true" />
+          {copy.back}
         </Link>
 
         <section className="mt-6 overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-xl shadow-slate-200/60">
           <div className="bg-slate-950 p-6 text-white">
             <span className="inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-blue-600">
-              <ScanLine size={24} />
+              <ScanLine size={24} aria-hidden="true" />
             </span>
-            <h1 className="mt-5 text-3xl font-black">Проверка на билет</h1>
+            <h1 className="mt-5 text-3xl font-black">{copy.title}</h1>
             <p className="mt-2 text-slate-300">
-              Потвърди данните, преди да маркираш билета като използван.
+              {copy.description}
             </p>
           </div>
 
           <div className="p-6">
             {successfulCheckIn && (
               <StatusBox tone="success" icon={<CheckCircle2 size={20} />}>
-                Check-in е успешен. Билетът вече е маркиран като използван.
+                {copy.success}
               </StatusBox>
             )}
             {alreadyUsed && (
               <StatusBox tone="warning" icon={<AlertTriangle size={20} />}>
-                Този билет вече е бил използван.
+                {copy.alreadyUsed}
               </StatusBox>
             )}
             {(verifiedTestTicket ||
               (ticket && secretMatches && testSimulation)) && (
               <StatusBox tone="info" icon={<ShieldCheck size={20} />}>
-                QR кодът потвърждава Tiketko Stripe тестова покупка. Този
-                PDF не е валиден за вход в събитието и не може да бъде
-                маркиран като използван.
+                {copy.testTicket}
               </StatusBox>
             )}
             {ticket && secretMatches && !ticket.purchaseSnapshot && (
               <StatusBox tone="danger" icon={<AlertTriangle size={20} />}>
-                Този стар билет няма надежден snapshot на покупката и не може
-                да бъде допуснат за check-in.
+                {copy.legacyTicket}
               </StatusBox>
             )}
             {!id && (
               <StatusBox tone="info" icon={<ScanLine size={20} />}>
-                Сканирай QR кода от PDF билета с камерата на служебния
-                телефон. След отваряне на линка данните за посетителя ще се
-                покажат тук за потвърждение.
+                {copy.scanInstructions}
               </StatusBox>
             )}
             {(status === "invalid" ||
               (id && !hasTrustedStatus && (!ticket || !secretMatches))) && (
               <StatusBox tone="danger" icon={<AlertTriangle size={20} />}>
-                Билетът или кодът за проверка е невалиден.
+                {copy.invalid}
               </StatusBox>
             )}
 
             {ticket && secretMatches && (
               <>
                 <div className="mt-5 grid gap-3 rounded-2xl bg-slate-50 p-5">
-                  <Detail label="Събитие" value={ticket.eventName} />
-                  <Detail label="Посетител" value={ticket.buyerName} />
-                  <Detail label="Място" value={ticket.seatLabel} />
-                  <Detail label="Номер" value={ticket.id} />
                   <Detail
-                    label="Статус"
+                    label={copy.event}
+                    value={
+                      ticket.purchaseSnapshot?.eventName ?? ticket.eventName
+                    }
+                  />
+                  <Detail label={copy.visitor} value={ticket.buyerName} />
+                  <Detail label={copy.seat} value={ticket.seatLabel} />
+                  <Detail label={copy.number} value={ticket.id} />
+                  <Detail
+                    label={copy.status}
                     value={
                       testSimulation
-                        ? "Stripe тест - без право на вход"
+                        ? copy.testStatus
                         : !admissionTicket
-                        ? "Непотвърден стар билет"
+                        ? copy.legacyStatus
                         : ticket.status === "checked_in"
-                        ? "Вече използван"
-                        : "Валиден"
+                        ? copy.usedStatus
+                        : copy.validStatus
                     }
                   />
                 </div>
@@ -155,15 +156,15 @@ export default async function CheckInPage({
                       type="submit"
                       className="inline-flex h-12 w-full items-center justify-center gap-2 rounded-2xl bg-emerald-600 px-5 font-black text-white transition hover:bg-emerald-700"
                     >
-                      <TicketCheck size={19} />
-                      Потвърди check-in
+                      <TicketCheck size={19} aria-hidden="true" />
+                      {copy.confirm}
                     </button>
                   </form>
                 )}
 
                 <p className="mt-4 flex items-center justify-center gap-2 text-xs font-bold text-slate-500">
-                  <ShieldCheck size={15} />
-                  Действието се записва в одитния журнал
+                  <ShieldCheck size={15} aria-hidden="true" />
+                  {copy.audit}
                 </p>
               </>
             )}
@@ -173,6 +174,61 @@ export default async function CheckInPage({
     </main>
   );
 }
+
+const CHECK_IN_COPY = {
+  bg: {
+    back: "Към организаторския панел",
+    title: "Проверка на билет",
+    description:
+      "Потвърди данните, преди да маркираш билета като използван.",
+    success:
+      "Проверката е успешна. Билетът вече е маркиран като използван.",
+    alreadyUsed: "Този билет вече е бил използван.",
+    testTicket:
+      "QR кодът потвърждава Tiketko Stripe тестова покупка. PDF файлът не е валиден за вход и не може да бъде маркиран като използван.",
+    legacyTicket:
+      "Този стар билет няма надеждни данни за покупката и не може да бъде допуснат за проверка на входа.",
+    scanInstructions:
+      "Сканирай QR кода от PDF билета с камерата на служебния телефон. Данните за посетителя ще се покажат тук за потвърждение.",
+    invalid: "Билетът или кодът за проверка е невалиден.",
+    event: "Събитие",
+    visitor: "Посетител",
+    seat: "Място",
+    number: "Номер",
+    status: "Статус",
+    testStatus: "Stripe тест - без право на вход",
+    legacyStatus: "Непотвърден стар билет",
+    usedStatus: "Вече използван",
+    validStatus: "Валиден билет за вход",
+    confirm: "Потвърди влизането",
+    audit: "Действието се записва в одитния журнал",
+  },
+  en: {
+    back: "Back to organizer dashboard",
+    title: "Ticket check-in",
+    description: "Confirm the details before marking the ticket as used.",
+    success: "Check-in succeeded. The ticket is now marked as used.",
+    alreadyUsed: "This ticket has already been used.",
+    testTicket:
+      "The QR code confirms a Tiketko Stripe test purchase. The PDF is not valid for admission and cannot be marked as used.",
+    legacyTicket:
+      "This legacy ticket has no trusted purchase snapshot and cannot be admitted.",
+    scanInstructions:
+      "Scan the PDF ticket QR code with the staff phone. The visitor details will appear here for confirmation.",
+    invalid: "The ticket or verification code is invalid.",
+    event: "Event",
+    visitor: "Visitor",
+    seat: "Seat",
+    number: "Number",
+    status: "Status",
+    testStatus: "Stripe test - no admission rights",
+    legacyStatus: "Unverified legacy ticket",
+    usedStatus: "Already used",
+    validStatus: "Valid admission ticket",
+    confirm: "Confirm check-in",
+    audit: "This action is recorded in the audit log",
+  },
+} as const;
 
 function Detail({ label, value }: { label: string; value: string }) {
   return (

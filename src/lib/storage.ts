@@ -4,6 +4,13 @@ import path from "path";
 
 const localStorageDir = path.join(process.cwd(), ".data", "storage", "tickets");
 
+export function ticketStorageKey(id: string): string {
+  if (!/^[A-Za-z0-9_-]{1,128}$/u.test(id)) {
+    throw new Error("INVALID_TICKET_STORAGE_ID");
+  }
+  return `tickets/${id}.pdf`;
+}
+
 function hasS3Config(): boolean {
   return Boolean(
     process.env.S3_BUCKET &&
@@ -38,7 +45,7 @@ export async function storeTicketPdf(input: {
   pdf: Uint8Array;
   baseUrl: string;
 }): Promise<{ storageKey: string; storageUrl: string }> {
-  const storageKey = `tickets/${input.id}.pdf`;
+  const storageKey = ticketStorageKey(input.id);
   ensureStorageConfigured();
 
   if (hasS3Config()) {
@@ -70,6 +77,18 @@ export async function readTicketPdf(input: {
   id: string;
   storageKey: string;
 }): Promise<Uint8Array | null> {
+  // The authenticated ticket ID is the storage namespace boundary. Never let
+  // a corrupted or manually edited database row select another ticket object.
+  let expectedStorageKey: string;
+  try {
+    expectedStorageKey = ticketStorageKey(input.id);
+  } catch {
+    return null;
+  }
+  if (input.storageKey !== expectedStorageKey) {
+    return null;
+  }
+
   ensureStorageConfigured();
 
   if (hasS3Config()) {

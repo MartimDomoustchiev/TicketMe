@@ -10,6 +10,11 @@ test("public health response exposes status only and caches its probe", async ()
   );
 
   assert.match(route, /READINESS_CACHE_TTL_MS\s*=\s*30_000/);
+  assert.match(route, /MINIMUM_CRON_SECRET_LENGTH\s*=\s*32/);
+  assert.match(route, /isStripeWebhookConfigured\(\)/);
+  assert.match(route, /process\.env\.CRON_SECRET/);
+  assert.match(route, /process\.env\.EVENT_DISCOVERY_CRON_SECRET/);
+  assert.match(route, /cron:\s*isCronSecretConfigured\(\) \|\| development/);
   assert.match(route, /status: ready \? "ready" : "degraded"/);
   assert.match(route, /"Cache-Control": "no-store"/);
   const publicResponse = route.slice(route.lastIndexOf("return Response.json("));

@@ -4,12 +4,16 @@ import {
 } from "@/lib/database";
 import { isEmailReadyForArbitraryRecipients } from "@/lib/email";
 import { resolvePublicBaseUrl } from "@/lib/site";
-import { isStripeEmbeddedConfigured } from "@/lib/stripe";
+import {
+  isStripeEmbeddedConfigured,
+  isStripeWebhookConfigured,
+} from "@/lib/stripe";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const READINESS_CACHE_TTL_MS = 30_000;
+const MINIMUM_CRON_SECRET_LENGTH = 32;
 
 type HealthReadiness = {
   ready: boolean;
@@ -21,6 +25,16 @@ let cachedReadiness:
       promise: Promise<HealthReadiness>;
     }
   | undefined;
+
+function isCronSecretConfigured(): boolean {
+  return [
+    process.env.CRON_SECRET,
+    process.env.EVENT_DISCOVERY_CRON_SECRET,
+  ].some(
+    (secret) =>
+      (secret?.trim().length ?? 0) >= MINIMUM_CRON_SECRET_LENGTH,
+  );
+}
 
 async function probeReadiness(): Promise<HealthReadiness> {
   const postgresConfigured = isDatabaseConfigured();
@@ -38,8 +52,13 @@ async function probeReadiness(): Promise<HealthReadiness> {
           process.env.S3_SECRET_ACCESS_KEY,
       ) || development,
     publicUrl: Boolean(resolvePublicBaseUrl()) || development,
-    stripe: stripeEmbedded || development,
+    stripe:
+      (stripeEmbedded && isStripeWebhookConfigured()) || development,
+    cron: isCronSecretConfigured() || development,
   };
+
+  // Readiness validates local configuration and database access only. It does
+  // not make health-check traffic depend on external provider reachability.
 
   let databaseReachable = development;
   let databaseSchemaReady = development;

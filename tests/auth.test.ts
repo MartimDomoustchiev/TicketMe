@@ -23,10 +23,15 @@ import {
   isValidName,
   isValidPassword,
 } from "../src/lib/auth-validation";
-import { consumeRateLimit } from "../src/lib/rate-limit";
+import {
+  consumeRateLimit,
+  consumeRateLimitsInOrder,
+} from "../src/lib/rate-limit";
 import { isSameOriginRequest } from "../src/lib/request-security";
 import { POST as sessionPost } from "../src/app/api/session/route";
 import { GET as verificationGet } from "../src/app/api/verify/confirm/route";
+import { POST as verificationStartPost } from "../src/app/api/verify/start/route";
+import { CURRENT_TERMS_VERSION } from "../src/lib/legal";
 
 let testDirectory = "";
 let authDataPath = "";
@@ -75,16 +80,29 @@ test("local auth persists users while keeping passwords and tokens opaque", asyn
     email: "Candidate@Example.com",
     name: "Candidate User",
     passwordHash: await hashPassword(plaintextPassword),
+    termsVersion: CURRENT_TERMS_VERSION,
   });
   assert.equal(result.status, "created");
   if (result.status !== "created") {
     assert.fail("Expected account creation to succeed.");
   }
+  assert.equal(
+    result.verification.user.termsAcceptedVersion,
+    CURRENT_TERMS_VERSION,
+  );
+  assert.ok(result.verification.user.termsAcceptedAt);
+  assert.equal(
+    Number.isNaN(
+      Date.parse(result.verification.user.termsAcceptedAt ?? ""),
+    ),
+    false,
+  );
 
   const duplicate = await createUser({
     email: "candidate@example.com",
     name: "Duplicate",
     passwordHash: await hashPassword("AnotherPass9"),
+    termsVersion: CURRENT_TERMS_VERSION,
   });
   assert.deepEqual(duplicate, { status: "duplicate" });
 
@@ -135,6 +153,7 @@ test("an unverified account cannot be promoted or receive a session", async () =
     email: "unverified@example.com",
     name: "Unverified User",
     passwordHash: await hashPassword("Unverified9"),
+    termsVersion: CURRENT_TERMS_VERSION,
   });
   assert.equal(result.status, "created");
   if (result.status !== "created") {
@@ -510,6 +529,105 @@ test("verification GET only opens the confirmation screen", () => {
   assert.equal(location.pathname, "/en/verify");
   assert.equal(location.searchParams.get("token"), token);
   assert.equal(location.searchParams.get("next"), "/en/events");
+});
+
+test("verification resend has independent fixed IP and account limits", async () => {
+  globalThis.__ticketForgeRateLimits?.clear();
+
+  const request = (ip: string, email: string) =>
+    verificationStartPost(
+      new Request("https://tickets.example/api/verify/start", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          host: "tickets.example",
+          origin: "https://tickets.example",
+          "sec-fetch-site": "same-origin",
+          "x-vercel-forwarded-for": ip,
+        },
+        body: JSON.stringify({ email, locale: "en" }),
+      }),
+    );
+
+  for (let index = 0; index < 15; index += 1) {
+    const response = await request(
+      "203.0.113.10",
+      `rotating-${index}@example.com`,
+    );
+    assert.equal(response.status, 200);
+  }
+
+  const ipLimited = await request(
+    "203.0.113.10",
+    "rotating-denied@example.com",
+  );
+  assert.equal(ipLimited.status, 429);
+  assert.deepEqual(await ipLimited.json(), { error: "rate-limit" });
+  assert.equal(
+    globalThis.__ticketForgeRateLimits?.has(
+      "verification:account:rotating-denied@example.com",
+    ),
+    false,
+  );
+
+  globalThis.__ticketForgeRateLimits?.clear();
+  for (let index = 0; index < 5; index += 1) {
+    assert.equal(
+      (await request(`198.51.100.${index + 1}`, "shared@example.com"))
+        .status,
+      200,
+    );
+  }
+  assert.equal(
+    (await request("198.51.100.99", "shared@example.com")).status,
+    429,
+  );
+
+  globalThis.__ticketForgeRateLimits?.clear();
+});
+
+test("ordered rate limits stop before writing a novel secondary bucket", async () => {
+  globalThis.__ticketForgeRateLimits?.clear();
+  const primary = {
+    key: "ordered-test:ip:203.0.113.20",
+    limit: 1,
+    windowMs: 60_000,
+  };
+
+  assert.equal(
+    (
+      await consumeRateLimitsInOrder([
+        primary,
+        {
+          key: "ordered-test:account:first@example.com",
+          limit: 5,
+          windowMs: 60_000,
+        },
+      ])
+    ).allowed,
+    true,
+  );
+  assert.equal(
+    (
+      await consumeRateLimitsInOrder([
+        primary,
+        {
+          key: "ordered-test:account:novel@example.com",
+          limit: 5,
+          windowMs: 60_000,
+        },
+      ])
+    ).allowed,
+    false,
+  );
+  assert.equal(
+    globalThis.__ticketForgeRateLimits?.has(
+      "ordered-test:account:novel@example.com",
+    ),
+    false,
+  );
+
+  globalThis.__ticketForgeRateLimits?.clear();
 });
 
 test("the in-process limiter opportunistically bounds its memory", async () => {

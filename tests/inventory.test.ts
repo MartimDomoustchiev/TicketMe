@@ -230,6 +230,7 @@ test("external test offers reserve atomically and remain isolated by event", asy
     await store.attachCheckoutSession({
       reservationId: attachedReservation.id,
       stripeCheckoutSessionId: "cs_test_deadline_authoritative",
+      stripeLivemode: false,
     });
     await new Promise((resolve) => setTimeout(resolve, 30));
 

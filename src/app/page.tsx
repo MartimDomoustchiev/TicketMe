@@ -21,6 +21,7 @@ import {
   eventTimestamp,
   formatEventDate,
   localizedEventTagline,
+  localizedEventTitle,
   localizeCity,
 } from "@/components/marketplace/catalog-ui";
 import {
@@ -128,7 +129,7 @@ export default async function Home() {
               {copy.weeklyHighlight}
             </p>
             <h1 className="mt-6 text-5xl font-black leading-[0.98] tracking-[-0.055em] sm:text-7xl lg:text-[5.3rem]">
-              {heroEvent.title}
+              {localizedEventTitle(heroEvent, locale)}
             </h1>
             <p className="mt-6 max-w-2xl text-lg font-medium leading-8 text-slate-200 sm:text-xl">
               {localizedEventTagline(heroEvent, locale)}

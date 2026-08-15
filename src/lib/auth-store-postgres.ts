@@ -34,9 +34,50 @@ async function prepareSchema(): Promise<void> {
       role TEXT NOT NULL DEFAULT 'buyer'
         CHECK (role IN ('buyer', 'admin')),
       email_verified_at TIMESTAMPTZ,
+      terms_accepted_version TEXT,
+      terms_accepted_at TIMESTAMPTZ,
       created_at TIMESTAMPTZ NOT NULL,
-      updated_at TIMESTAMPTZ NOT NULL
+      updated_at TIMESTAMPTZ NOT NULL,
+      CONSTRAINT users_terms_acceptance_check CHECK (
+        NUM_NONNULLS(terms_accepted_version, terms_accepted_at) IN (0, 2)
+        AND (
+          terms_accepted_version IS NULL
+          OR LENGTH(BTRIM(terms_accepted_version)) BETWEEN 1 AND 64
+        )
+      )
     )
+  `;
+  await db`
+    ALTER TABLE users
+    ADD COLUMN IF NOT EXISTS terms_accepted_version TEXT
+  `;
+  await db`
+    ALTER TABLE users
+    ADD COLUMN IF NOT EXISTS terms_accepted_at TIMESTAMPTZ
+  `;
+  await db`
+    DO $$
+    BEGIN
+      IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conname = 'users_terms_acceptance_check'
+          AND conrelid = 'users'::regclass
+      ) THEN
+        ALTER TABLE users
+          ADD CONSTRAINT users_terms_acceptance_check CHECK (
+            NUM_NONNULLS(
+              terms_accepted_version,
+              terms_accepted_at
+            ) IN (0, 2)
+            AND (
+              terms_accepted_version IS NULL
+              OR LENGTH(BTRIM(terms_accepted_version)) BETWEEN 1 AND 64
+            )
+          );
+      END IF;
+    END
+    $$
   `;
   await db`
     CREATE UNIQUE INDEX IF NOT EXISTS users_email_lower_idx
@@ -104,6 +145,12 @@ function mapUser(row: Record<string, unknown>): StoredUser {
     emailVerifiedAt: row.email_verified_at
       ? iso(row.email_verified_at)
       : null,
+    termsAcceptedVersion: row.terms_accepted_version
+      ? String(row.terms_accepted_version)
+      : null,
+    termsAcceptedAt: row.terms_accepted_at
+      ? iso(row.terms_accepted_at)
+      : null,
     createdAt: iso(row.created_at),
     updatedAt: iso(row.updated_at),
   };
@@ -147,7 +194,7 @@ export async function findUserByEmail(
   const rows = await databaseSql()`
     SELECT
       id, email, name, password_hash, role, email_verified_at,
-      created_at, updated_at
+      terms_accepted_version, terms_accepted_at, created_at, updated_at
     FROM users
     WHERE email = ${normalizeEmail(email)}
     LIMIT 1
@@ -159,6 +206,7 @@ export async function createUser(input: {
   email: string;
   name: string;
   passwordHash: string;
+  termsVersion: string;
 }): Promise<CreateUserResult> {
   await ensureSchema();
   const db = databaseSql();
@@ -168,7 +216,7 @@ export async function createUser(input: {
     const rows = await transaction`
       INSERT INTO users (
         id, email, name, password_hash, role, email_verified_at,
-        created_at, updated_at
+        terms_accepted_version, terms_accepted_at, created_at, updated_at
       )
       VALUES (
         ${`usr_${createOpaqueToken(18)}`},
@@ -177,13 +225,15 @@ export async function createUser(input: {
         ${input.passwordHash},
         'buyer',
         NULL,
+        ${input.termsVersion},
+        ${now},
         ${now},
         ${now}
       )
       ON CONFLICT DO NOTHING
       RETURNING
         id, email, name, password_hash, role, email_verified_at,
-        created_at, updated_at
+        terms_accepted_version, terms_accepted_at, created_at, updated_at
     `;
     if (!rows[0]) {
       return { status: "duplicate" };
@@ -205,7 +255,7 @@ export async function issueEmailVerification(
     const rows = await transaction`
       SELECT
         id, email, name, password_hash, role, email_verified_at,
-        created_at, updated_at
+        terms_accepted_version, terms_accepted_at, created_at, updated_at
       FROM users
       WHERE email = ${normalizeEmail(email)}
       FOR UPDATE
@@ -248,7 +298,7 @@ export async function consumeEmailVerification(
       WHERE id = ${String(tokenRow.user_id)}
       RETURNING
         id, email, name, password_hash, role, email_verified_at,
-        created_at, updated_at
+        terms_accepted_version, terms_accepted_at, created_at, updated_at
     `;
     if (!userRows[0]) {
       return null;
@@ -310,6 +360,8 @@ export async function findSession(
       u.password_hash,
       u.role,
       u.email_verified_at,
+      u.terms_accepted_version,
+      u.terms_accepted_at,
       u.created_at,
       u.updated_at
     FROM auth_sessions s

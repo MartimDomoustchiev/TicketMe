@@ -2,14 +2,20 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
-import { createElement } from "react";
+import {
+  createElement,
+  type ComponentProps,
+  type ComponentType,
+} from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { EventCard } from "@/components/marketplace/EventCard";
+import { TicketDesk } from "@/components/TicketDesk";
 import { EventPurchasePanel } from "@/components/ticketing/EventPurchasePanel";
 import { LiveTicketingProvider } from "@/components/ticketing/LiveTicketingProvider";
 import {
   EVENT,
   isEventOpenForTicketMeCheckout,
+  PRIMARY_SALE_EVENT,
   type CatalogEvent,
 } from "@/lib/event";
 
@@ -39,10 +45,14 @@ const EVENT_AVAILABILITY = {
   sold: 0,
 };
 
+const TestLiveTicketingProvider = LiveTicketingProvider as ComponentType<
+  Omit<ComponentProps<typeof LiveTicketingProvider>, "children">
+>;
+
 function renderTestCheckoutPanel(locale: "bg" | "en"): string {
   return renderToStaticMarkup(
     createElement(
-      LiveTicketingProvider,
+      TestLiveTicketingProvider,
       {
         eventId: EVENT.id,
         initialAvailability: EVENT_AVAILABILITY,
@@ -152,5 +162,64 @@ test("public routes expose the internal test-checkout path", async () => {
   assert.match(
     detailPage,
     /checkoutEnabled\s*&&\s*!testSimulation[\s\S]*?offers:/,
+  );
+});
+
+test("Stripe test mode does not revoke a first-party admission offer", () => {
+  const event = {
+    ...PRIMARY_SALE_EVENT,
+    startsAt: "2099-09-29T20:00:00.000Z",
+  };
+  const capacity = Object.fromEntries(
+    event.ticketTypes.map((ticketType) => [
+      ticketType.id,
+      ticketType.capacity,
+    ]),
+  ) as Record<"fan" | "standard" | "premium", number>;
+  const totalCapacity = event.ticketTypes.reduce(
+    (total, ticketType) => total + ticketType.capacity,
+    0,
+  );
+  const html = renderToStaticMarkup(
+    createElement(TicketDesk, {
+      event,
+      initialAvailability: {
+        totalCapacity,
+        totalRemaining: totalCapacity,
+        byType: capacity,
+        sold: 0,
+      },
+      initialSession: {
+        email: "buyer@example.com",
+        name: "Verified Buyer",
+        verifiedAt: "2099-01-01T00:00:00.000Z",
+        expiresAt: "2099-12-31T00:00:00.000Z",
+      },
+      paymentMode: "test",
+      stripePublishableKey: "pk_test_fixture",
+      locale: "en",
+    }),
+  );
+
+  assert.match(html, /Stripe test mode: no real money is charged/);
+  assert.match(html, /issues the admission ticket shown above/);
+  assert.match(html, /Electronic PDF ticket/);
+  assert.doesNotMatch(html, /not valid for admission|not valid for entry/i);
+  assert.doesNotMatch(html, /simulation data|Test standard category/i);
+});
+
+test("checkout success derives simulation status from the ticket snapshot", async () => {
+  const successPage = await source("src/app/checkout/success/page.tsx");
+
+  assert.match(
+    successPage,
+    /purchaseSnapshot\?\.offerKind\s*===\s*"test-simulation"/,
+  );
+  assert.match(successPage, /state\.ticket\?\.stripeLivemode\s*===\s*false/);
+  assert.match(successPage, /purchaseSnapshot\.sourceUrl/);
+  assert.doesNotMatch(successPage, /stripeMode\(\)|getEventById/);
+  assert.doesNotMatch(
+    successPage,
+    /isTestSimulationEvent\(event\)/,
   );
 });

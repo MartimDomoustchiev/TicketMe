@@ -49,6 +49,7 @@ export function createUser(input: {
   email: string;
   name: string;
   passwordHash: string;
+  termsVersion: string;
 }): Promise<CreateUserResult> {
   assertPersistenceConfigured();
   return hasPostgres()

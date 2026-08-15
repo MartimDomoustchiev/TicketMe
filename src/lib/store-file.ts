@@ -42,6 +42,7 @@ export type StoredTicket = {
   qrSecret: string;
   status: TicketStatus;
   purchaseSnapshot: CheckoutPurchaseSnapshot | null;
+  stripeLivemode?: boolean | null;
   checkoutReservationId?: string;
   stripeCheckoutSessionId?: string;
   stripePaymentIntentId?: string;
@@ -67,6 +68,7 @@ export type CheckoutReservation = {
   deliveryLeaseExpiresAt: string | null;
   deliveredAt: string | null;
   purchaseSnapshot: CheckoutPurchaseSnapshot | null;
+  stripeLivemode?: boolean | null;
 };
 
 type StoredCheckoutReservation = CheckoutReservation & {
@@ -98,6 +100,7 @@ export type ReserveCheckoutTicketInput = {
 export type AttachCheckoutSessionInput = {
   reservationId: string;
   stripeCheckoutSessionId: string;
+  stripeLivemode: boolean;
 };
 
 export type FulfillCheckoutReservationInput = {
@@ -259,6 +262,10 @@ function normalizeReservation(
     releasedAt: reservation.releasedAt ?? null,
     fulfilledAt: reservation.fulfilledAt ?? null,
     stripeCheckoutSessionId: reservation.stripeCheckoutSessionId ?? null,
+    stripeLivemode:
+      typeof reservation.stripeLivemode === "boolean"
+        ? reservation.stripeLivemode
+        : null,
     stripePaymentIntentId: reservation.stripePaymentIntentId ?? null,
     ticketId: reservation.ticketId ?? null,
     deliveryStatus,
@@ -278,6 +285,10 @@ function normalizeReservation(
 function normalizeTicket(ticket: StoredTicket): StoredTicket {
   return {
     ...ticket,
+    stripeLivemode:
+      typeof ticket.stripeLivemode === "boolean"
+        ? ticket.stripeLivemode
+        : null,
     purchaseSnapshot: normalizeCheckoutPurchaseSnapshot(
       ticket.purchaseSnapshot,
     ),
@@ -543,6 +554,7 @@ function createStoredTicket(input: {
   qrSecret: string;
   checkoutReservationId?: string;
   stripeCheckoutSessionId?: string;
+  stripeLivemode?: boolean | null;
   stripePaymentIntentId?: string;
   purchaseSnapshot?: CheckoutPurchaseSnapshot;
 }): StoredTicket {
@@ -584,6 +596,10 @@ function createStoredTicket(input: {
     ...(input.stripeCheckoutSessionId
       ? { stripeCheckoutSessionId: input.stripeCheckoutSessionId }
       : {}),
+    stripeLivemode:
+      typeof input.stripeLivemode === "boolean"
+        ? input.stripeLivemode
+        : null,
     ...(input.stripePaymentIntentId
       ? { stripePaymentIntentId: input.stripePaymentIntentId }
       : {}),
@@ -809,6 +825,7 @@ export async function reserveCheckoutTicket(
       releasedAt: null,
       fulfilledAt: null,
       stripeCheckoutSessionId: null,
+      stripeLivemode: null,
       stripePaymentIntentId: null,
       ticketId: null,
       deliveryStatus: null,
@@ -892,6 +909,16 @@ export async function attachCheckoutSession(
         changedEventId: null,
       };
     }
+    if (
+      typeof reservation.stripeLivemode === "boolean" &&
+      reservation.stripeLivemode !== input.stripeLivemode
+    ) {
+      return {
+        reservation: publicReservation(reservation),
+        error: "CHECKOUT_PAYMENT_MODE_MISMATCH",
+        changedEventId: null,
+      };
+    }
 
     const duplicate = Object.values(state.checkoutReservations).find(
       (candidate) =>
@@ -906,16 +933,23 @@ export async function attachCheckoutSession(
       };
     }
 
-    if (!reservation.stripeCheckoutSessionId) {
+    if (
+      !reservation.stripeCheckoutSessionId ||
+      typeof reservation.stripeLivemode !== "boolean"
+    ) {
+      const newlyAttached = !reservation.stripeCheckoutSessionId;
       reservation.stripeCheckoutSessionId = input.stripeCheckoutSessionId;
+      reservation.stripeLivemode = input.stripeLivemode;
       reservation.status = "checkout_created";
-      state.auditLog.push({
-        id: randomBytes(10).toString("hex"),
-        at: new Date().toISOString(),
-        action: "checkout_session_attached",
-        actor: reservation.buyerEmail,
-        details: `${reservation.id} ${input.stripeCheckoutSessionId}`,
-      });
+      if (newlyAttached) {
+        state.auditLog.push({
+          id: randomBytes(10).toString("hex"),
+          at: new Date().toISOString(),
+          action: "checkout_session_attached",
+          actor: reservation.buyerEmail,
+          details: `${reservation.id} ${input.stripeCheckoutSessionId}`,
+        });
+      }
     }
     return {
       reservation: publicReservation(reservation),
@@ -1174,6 +1208,7 @@ export async function fulfillCheckoutReservation(
       checkoutReservationId: reservation.id,
       stripeCheckoutSessionId:
         reservation.stripeCheckoutSessionId ?? undefined,
+      stripeLivemode: reservation.stripeLivemode,
       stripePaymentIntentId: input.stripePaymentIntentId,
       purchaseSnapshot: reservation.purchaseSnapshot,
     });

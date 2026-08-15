@@ -15,6 +15,7 @@ import {
   catalogSearchText,
   categoryLabel,
   eventTimestamp,
+  localizedEventTitle,
   localizeCity,
 } from "@/components/marketplace/catalog-ui";
 import { listCatalogEvents } from "@/lib/catalog";
@@ -111,8 +112,8 @@ function sortEvents(
       return eventTimestamp(left) - eventTimestamp(right);
     }
     if (sort === "name") {
-      return left.title.localeCompare(
-        right.title,
+      return localizedEventTitle(left, locale).localeCompare(
+        localizedEventTitle(right, locale),
         locale === "en" ? "en-GB" : "bg-BG",
       );
     }

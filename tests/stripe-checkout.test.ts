@@ -211,6 +211,7 @@ test("Stripe fulfillment is pinned to the immutable reservation snapshot", () =>
   const reservation = {
     eventId: INTERNAL_EVENT.id,
     ticketType: TICKET_TYPE.id,
+    stripeLivemode: false,
     purchaseSnapshot: snapshot,
   };
   const session = {
@@ -227,6 +228,14 @@ test("Stripe fulfillment is pinned to the immutable reservation snapshot", () =>
   assert.equal(
     assertStripeCheckoutPurchaseSnapshot(session, reservation),
     snapshot,
+  );
+  assert.throws(
+    () =>
+      assertStripeCheckoutPurchaseSnapshot(session, {
+        ...reservation,
+        stripeLivemode: true,
+      }),
+    /CHECKOUT_PAYMENT_MODE_MISMATCH/,
   );
   assert.throws(
     () =>
@@ -251,6 +260,18 @@ test("Stripe fulfillment is pinned to the immutable reservation snapshot", () =>
         purchaseSnapshot: null,
       }),
     /CHECKOUT_PURCHASE_SNAPSHOT_MISSING/,
+  );
+});
+
+test("paid fulfillment backfills missing mode from the trusted Stripe session", async () => {
+  const fulfillment = await readFile(
+    path.join(process.cwd(), "src/lib/stripe-fulfillment.ts"),
+    "utf8",
+  );
+
+  assert.match(
+    fulfillment,
+    /typeof reservation\.stripeLivemode !== "boolean"[\s\S]*reservation\.status === "checkout_created"[\s\S]*attachCheckoutSession\(\{[\s\S]*stripeLivemode: session\.livemode/,
   );
 });
 

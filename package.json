@@ -8,6 +8,7 @@
     "build:sites": "node scripts/build-sites-redirect.mjs",
     "build:cloudflare": "node scripts/build-sites.mjs",
     "art:generate": "tsx scripts/generate-event-art.ts",
+    "icons:generate": "tsx scripts/generate-favicons.ts",
     "preview:cloudflare": "opennextjs-cloudflare build && opennextjs-cloudflare preview",
     "cf:typegen": "wrangler types --env-interface CloudflareEnv cloudflare-env.d.ts",
     "db:check": "tsx scripts/check-database.ts",

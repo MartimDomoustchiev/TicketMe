@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { MarketplaceFooter } from "@/components/marketplace/MarketplaceFooter";
 import { MarketplaceHeader } from "@/components/marketplace/MarketplaceHeader";
 import { getLocale } from "@/lib/i18n";
+import { legalLastUpdatedDate } from "@/lib/legal";
 
 export async function generateMetadata(): Promise<Metadata> {
   const locale = await getLocale();
@@ -34,7 +35,7 @@ export default async function PrivacyPage() {
             {copy.title}
           </h1>
           <p className="mt-3 text-sm text-slate-500">
-            {copy.updated}
+            {copy.updatedPrefix} {legalLastUpdatedDate(locale)}
           </p>
 
           <div className="mt-8 space-y-8 text-[15px] leading-7 text-slate-700">
@@ -78,22 +79,22 @@ const PRIVACY_COPY = {
   bg: {
     eyebrow: "Лични данни",
     title: "Политика за поверителност",
-    updated: "Последна актуализация: 27 юли 2026 г.",
+    updatedPrefix: "Последна актуализация:",
     dataTitle: "Какви данни обработваме",
     data:
-      "При вход и поръчка обработваме име, имейл адрес, данни за избрания билет и техническа информация, необходима за защита от злоупотреби.",
+      "При регистрация, вход и поръчка обработваме име, имейл адрес, данни за избрания билет, платежен статус и идентификатори от Stripe, както и ограничена техническа информация, необходима за защита от злоупотреби. Данните за картата се въвеждат в интерфейса на Stripe и не преминават през Tiketko. Паролите, сесийните и потвърдителните токени се съхраняват само в хеширан вид.",
     purposeTitle: "За какво използваме данните",
     purpose:
-      "Данните са необходими за потвърждаване на имейла, издаване и изпращане на PDF билета, показване на билетите в профила и валидиране на достъпа при събитието.",
+      "Използваме данните, за да предоставим поисканата услуга: потвърждение на имейла, тестово или реално плащане според ясно показания режим, издаване и изпращане на PDF файла, показване на записите в профила, проверка на валидни билети за вход, предотвратяване на злоупотреби и изпълнение на приложими законови задължения.",
     providersTitle: "Доставчици",
     providers:
-      "За изпращане на служебни имейли и съхранение на PDF файлове може да използваме специализирани доставчици. До тях се предават само данните, нужни за конкретната услуга.",
+      "Stripe обработва тестовия или активирания платежен интерфейс, Resend доставя служебни имейли, а private S3/R2 хранилище пази PDF файловете. Хостингът и базата данни се обслужват от инфраструктурни доставчици. Всеки доставчик получава само данните, необходими за съответната функция.",
     storageTitle: "Съхранение и достъп",
     storage:
-      "Достъпът до билетите е ограничен до потвърдения собственик и оторизиран организатор. Данните се пазят за периода, необходим за обслужване на събитието, сигурност и отчетност.",
+      "Достъпът до билетите е ограничен до потвърдения собственик и оторизиран организатор. Сесиите изтичат най-късно след 14 дни, а линковете за потвърждение - след 30 минути. Данните за поръчки, билети и одит се пазят толкова, колкото е необходимо за събитието, сигурността, отчетността и приложимите законови задължения.",
     cookiesTitle: "Бисквитки",
     cookies:
-      "Tiketko използва строго необходими, защитени сесийни бисквитки за вход и авторизация. Те не се използват за рекламно проследяване и изтичат автоматично.",
+      "Tiketko използва строго необходими, защитени бисквитки. Бисквитката за вход и авторизация изтича най-късно след 14 дни. Бисквитката за избрания език се пази до една година. Те не се използват за рекламно проследяване.",
     rightsTitle: "Вашите права",
     rights:
       "Можете да поискате информация, корекция или изтриване на личните си данни, когато приложимото законодателство позволява това. Някои записи могат да бъдат запазени за сигурност и изпълнение на законови задължения.",
@@ -101,22 +102,22 @@ const PRIVACY_COPY = {
   en: {
     eyebrow: "Personal data",
     title: "Privacy policy",
-    updated: "Last updated: 27 July 2026",
+    updatedPrefix: "Last updated:",
     dataTitle: "Data we process",
     data:
-      "When you sign in or order, we process your name, email address, selected ticket details and technical information required to prevent abuse.",
+      "When you register, sign in or order, we process your name, email address, selected ticket, payment status and Stripe identifiers, and limited technical information required to prevent abuse. Card details are entered in Stripe's interface and do not pass through Tiketko. Passwords, session tokens and verification tokens are stored only in hashed form.",
     purposeTitle: "How we use the data",
     purpose:
-      "The data is required to verify your email, issue and deliver the PDF ticket, display tickets in your account and validate admission at the event.",
+      "We use the data to provide the requested service: email verification, test or real payment according to the clearly displayed mode, PDF issuance and delivery, account history, verification of valid admission tickets, abuse prevention and compliance with applicable legal obligations.",
     providersTitle: "Service providers",
     providers:
-      "We may use specialist providers to deliver transactional emails and store PDF files. They only receive the data required to provide that specific service.",
+      "Stripe provides the test or enabled payment interface, Resend delivers transactional email, and private S3/R2 storage holds PDF files. Hosting and database infrastructure are operated by infrastructure providers. Each provider receives only the data required for its function.",
     storageTitle: "Storage and access",
     storage:
-      "Ticket access is restricted to the verified owner and an authorized organizer. Data is retained for as long as needed to operate the event, maintain security and provide an audit record.",
+      "Ticket access is restricted to the verified owner and an authorized organizer. Sessions expire after no more than 14 days and verification links after 30 minutes. Order, ticket and audit records are retained for as long as needed to operate the event, maintain security and records, and meet applicable legal obligations.",
     cookiesTitle: "Cookies",
     cookies:
-      "Tiketko uses strictly necessary, secure session cookies for sign-in and authorization. They are not used for advertising tracking and expire automatically.",
+      "Tiketko uses strictly necessary, secure cookies. The sign-in and authorization cookie expires after no more than 14 days. The selected-language cookie lasts for up to one year. They are not used for advertising tracking.",
     rightsTitle: "Your rights",
     rights:
       "You may request access, correction or deletion of your personal data where applicable law permits. Some records may be retained for security and legal obligations.",

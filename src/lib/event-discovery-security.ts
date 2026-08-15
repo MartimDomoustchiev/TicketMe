@@ -1,4 +1,4 @@
-import { BlockList, isIP } from "node:net";
+import { BlockList, isIP, type LookupFunction } from "node:net";
 
 export const DEFAULT_DISCOVERY_FETCH_TIMEOUT_MS = 8_000;
 export const DEFAULT_DISCOVERY_MAX_FEED_BYTES = 1_000_000;
@@ -84,9 +84,20 @@ export type DiscoveryDnsLookup = (
   hostname: string,
 ) => Promise<readonly { address: string; family: number }[]>;
 
+export type DiscoveryDnsAddress = {
+  address: string;
+  family: number;
+};
+
 export type DiscoveryFetch = (
   input: string | URL | Request,
   init?: RequestInit,
+) => Promise<Response>;
+
+export type DiscoveryPinnedFetch = (
+  input: URL,
+  addresses: readonly DiscoveryDnsAddress[],
+  init: RequestInit,
 ) => Promise<Response>;
 
 export type FetchedDiscoveryFeed = {
@@ -99,9 +110,11 @@ export type FetchedDiscoveryFeed = {
 export type FetchDiscoveryFeedOptions = {
   allowedFeedUrls: readonly URL[];
   dnsLookup?: DiscoveryDnsLookup;
+  /** Test adapter. Production requests use pinnedFetchImpl or pinned HTTPS. */
   fetchImpl?: DiscoveryFetch;
   maxBytes?: number;
   maxRedirects?: number;
+  pinnedFetchImpl?: DiscoveryPinnedFetch;
   timeoutMs?: number;
 };
 
@@ -459,7 +472,7 @@ const defaultDnsLookup: DiscoveryDnsLookup = async (hostname) => {
 export async function assertPublicDiscoveryHost(
   url: URL,
   dnsLookup: DiscoveryDnsLookup = defaultDnsLookup,
-): Promise<void> {
+): Promise<readonly DiscoveryDnsAddress[]> {
   const hostname = stripIpv6Brackets(url.hostname);
 
   if (isIP(hostname)) {
@@ -469,7 +482,7 @@ export async function assertPublicDiscoveryHost(
         "Feed hostname resolves to a blocked address.",
       );
     }
-    return;
+    return [{ address: hostname, family: isIP(hostname) }];
   }
 
   let addresses: readonly { address: string; family: number }[];
@@ -495,6 +508,111 @@ export async function assertPublicDiscoveryHost(
       "Feed hostname resolves to a blocked address.",
     );
   }
+
+  return addresses;
+}
+
+/**
+ * Builds a Node lookup function that can only return addresses from the DNS
+ * result validated immediately before the request. TLS still uses the
+ * original hostname for SNI and certificate verification, but a DNS change
+ * between validation and connect cannot redirect the socket to another IP.
+ */
+export function createPinnedDiscoveryLookup(
+  addresses: readonly DiscoveryDnsAddress[],
+): LookupFunction {
+  const pinned = addresses.map(({ address, family }) => ({ address, family }));
+
+  return (_hostname, options, callback) => {
+    const requestedFamily =
+      typeof options.family === "number" && options.family !== 0
+        ? options.family
+        : null;
+    const candidates = requestedFamily
+      ? pinned.filter(({ family }) => family === requestedFamily)
+      : pinned;
+
+    if (candidates.length === 0) {
+      const error = new Error(
+        "No validated address matches the requested address family.",
+      ) as NodeJS.ErrnoException;
+      error.code = "ENOTFOUND";
+      callback(error, [], undefined);
+      return;
+    }
+
+    if (options.all) {
+      callback(null, candidates, undefined);
+      return;
+    }
+
+    const first = candidates[0];
+    callback(null, first.address, first.family);
+  };
+}
+
+async function fetchDiscoveryWithPinnedDns(
+  input: URL,
+  addresses: readonly DiscoveryDnsAddress[],
+  init: RequestInit,
+): Promise<Response> {
+  if (isCloudflareWorkerRuntime()) {
+    throw new DiscoverySecurityError(
+      "FETCH_FAILED",
+      "Discovery fetching requires a runtime that can pin validated DNS addresses.",
+    );
+  }
+
+  const [{ request }, { Readable }] = await Promise.all([
+    import("node:https"),
+    import("node:stream"),
+  ]);
+  const requestHeaders = new Headers(init.headers);
+  const headers: Record<string, string> = {};
+  requestHeaders.forEach((value, name) => {
+    headers[name] = value;
+  });
+
+  return new Promise<Response>((resolve, reject) => {
+    const outgoing = request(
+      input,
+      {
+        agent: false,
+        headers,
+        lookup: createPinnedDiscoveryLookup(addresses),
+        method: init.method ?? "GET",
+        signal: init.signal ?? undefined,
+      },
+      (incoming) => {
+        const responseHeaders = new Headers();
+        for (const [name, value] of Object.entries(incoming.headers)) {
+          if (Array.isArray(value)) {
+            for (const item of value) responseHeaders.append(name, item);
+          } else if (value !== undefined) {
+            responseHeaders.set(name, value);
+          }
+        }
+
+        const status = incoming.statusCode ?? 500;
+        const bodyless =
+          status === 101 || status === 204 || status === 205 || status === 304;
+        const body = bodyless
+          ? null
+          : (Readable.toWeb(incoming) as ReadableStream<Uint8Array>);
+
+        resolve(
+          new Response(body, {
+            headers: responseHeaders,
+            status,
+            statusText: incoming.statusMessage,
+          }),
+        );
+      },
+    );
+
+    outgoing.once("error", reject);
+    outgoing.end();
+  });
 }
 
 async function readBoundedResponseBody(
@@ -554,6 +672,15 @@ async function readBoundedResponseBody(
   return new TextDecoder("utf-8").decode(body);
 }
 
+async function discardResponseBody(response: Response): Promise<void> {
+  try {
+    await response.body?.cancel();
+  } catch {
+    // The request is already being rejected or redirected. Stream teardown
+    // errors must not replace the stable discovery error returned to callers.
+  }
+}
+
 export async function fetchDiscoveryFeed(
   requestedUrl: string | URL,
   options: FetchDiscoveryFeedOptions,
@@ -583,19 +710,21 @@ export async function fetchDiscoveryFeed(
     requestedUrl,
     options.allowedFeedUrls,
   );
-  const fetchImpl = options.fetchImpl ?? fetch;
   const controller = new AbortController();
 
   const operation = async (): Promise<FetchedDiscoveryFeed> => {
     let current = original;
 
     for (let redirectCount = 0; ; redirectCount += 1) {
-      await assertPublicDiscoveryHost(current, options.dnsLookup);
+      const addresses = await assertPublicDiscoveryHost(
+        current,
+        options.dnsLookup,
+      );
 
       let response: Response;
 
       try {
-        response = await fetchImpl(current, {
+        const requestInit: RequestInit = {
           headers: {
             accept:
               "application/atom+xml, application/feed+json, application/json, application/rss+xml, application/xml, text/calendar, text/xml;q=0.9",
@@ -603,7 +732,16 @@ export async function fetchDiscoveryFeed(
           },
           redirect: "manual",
           signal: controller.signal,
-        });
+        };
+        response = options.fetchImpl
+          ? await options.fetchImpl(current, requestInit)
+          : options.pinnedFetchImpl
+            ? await options.pinnedFetchImpl(current, addresses, requestInit)
+            : await fetchDiscoveryWithPinnedDns(
+                current,
+                addresses,
+                requestInit,
+              );
       } catch (error) {
         if (controller.signal.aborted) {
           throw error;
@@ -615,6 +753,7 @@ export async function fetchDiscoveryFeed(
       }
 
       if (REDIRECT_STATUSES.has(response.status)) {
+        await discardResponseBody(response);
         if (redirectCount >= maxRedirects) {
           throw new DiscoverySecurityError(
             "REDIRECT_BLOCKED",
@@ -655,6 +794,7 @@ export async function fetchDiscoveryFeed(
       }
 
       if (!response.ok) {
+        await discardResponseBody(response);
         throw new DiscoverySecurityError(
           "HTTP_ERROR",
           `Discovery feed returned HTTP ${response.status}.`,

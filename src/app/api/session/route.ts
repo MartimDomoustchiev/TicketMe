@@ -22,10 +22,14 @@ import {
   sendVerificationEmail,
   type EmailDelivery,
 } from "@/lib/email";
-import { consumeRateLimit, requestIdentity } from "@/lib/rate-limit";
+import {
+  consumeRateLimitsInOrder,
+  requestIdentity,
+} from "@/lib/rate-limit";
 import { readUrlEncodedBodyWithinLimit } from "@/lib/request-body";
 import { isSameOriginRequest } from "@/lib/request-security";
 import { getBaseUrl, safeReturnPath } from "@/lib/site";
+import { CURRENT_TERMS_VERSION } from "@/lib/legal";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -118,33 +122,18 @@ async function rateLimitFor(
   ipLimit: number,
 ) {
   const identity = requestIdentity(request);
-  const [perIp, perIdentity, perAccount] = await Promise.all([
-    consumeRateLimit({
+  return consumeRateLimitsInOrder([
+    {
       key: `auth:${intent}:ip:${identity}`,
       limit: ipLimit,
       windowMs: 15 * 60_000,
-    }),
-    consumeRateLimit({
-      key: `auth:${intent}:identity:${identity}:${email || "anonymous"}`,
-      limit: identityLimit,
-      windowMs: 15 * 60_000,
-    }),
-    consumeRateLimit({
+    },
+    {
       key: `auth:${intent}:account:${email || "anonymous"}`,
       limit: identityLimit,
       windowMs: 15 * 60_000,
-    }),
+    },
   ]);
-  return {
-    allowed: perIp.allowed && perIdentity.allowed && perAccount.allowed,
-    retryAfterSeconds: Math.max(
-      perIp.retryAfterSeconds,
-      perIdentity.retryAfterSeconds,
-      perAccount.retryAfterSeconds,
-    ),
-    unavailable:
-      perIp.unavailable || perIdentity.unavailable || perAccount.unavailable,
-  };
 }
 
 async function deliverVerification(
@@ -308,6 +297,7 @@ async function handleSignup(input: {
       email,
       name,
       passwordHash: await hashPassword(password),
+      termsVersion: CURRENT_TERMS_VERSION,
     });
   } catch (error) {
     console.error("Account creation failed.", error);

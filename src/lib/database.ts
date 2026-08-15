@@ -349,11 +349,59 @@ export async function databaseSchemaStatus(
         AND to_regclass('public.purchase_queue') IS NOT NULL
         AND to_regclass('public.purchase_queue_position_seq') IS NOT NULL
         AND to_regclass('public.checkout_reservations') IS NOT NULL
+        AND (
+          SELECT COUNT(*) = 18
+          FROM information_schema.columns
+          WHERE table_schema = 'public'
+            AND table_name IN ('checkout_reservations', 'tickets')
+            AND column_name IN (
+              'purchase_offer_kind',
+              'purchase_unit_amount_minor',
+              'purchase_currency',
+              'purchase_event_name',
+              'purchase_event_date',
+              'purchase_venue',
+              'purchase_ticket_label',
+              'purchase_source_name',
+              'purchase_source_url'
+            )
+        )
+        AND EXISTS (
+          SELECT 1
+          FROM pg_constraint
+          WHERE conname =
+            'checkout_reservations_purchase_snapshot_valid'
+            AND conrelid =
+              to_regclass('public.checkout_reservations')
+        )
+        AND EXISTS (
+          SELECT 1
+          FROM pg_constraint
+          WHERE conname = 'tickets_purchase_snapshot_valid'
+            AND conrelid = to_regclass('public.tickets')
+        )
+        AND (
+          SELECT COUNT(*) = 2
+          FROM information_schema.columns
+          WHERE table_schema = 'public'
+            AND column_name = 'stripe_livemode'
+            AND table_name IN ('checkout_reservations', 'tickets')
+        )
         AND to_regclass(
           'public.checkout_reservations_active_buyer_event_idx'
         ) IS NOT NULL
         AND to_regclass('public.audit_log') IS NOT NULL
         AND to_regclass('public.users') IS NOT NULL
+        AND (
+          SELECT COUNT(*) = 2
+          FROM information_schema.columns
+          WHERE table_schema = 'public'
+            AND table_name = 'users'
+            AND column_name IN (
+              'terms_accepted_version',
+              'terms_accepted_at'
+            )
+        )
         AND to_regclass('public.auth_sessions') IS NOT NULL
         AND to_regclass('public.email_verification_tokens') IS NOT NULL
         AND to_regclass('public.catalog_events') IS NOT NULL
@@ -476,6 +524,16 @@ export async function authDatabaseSchemaStatus(
   const rows = await client`
     SELECT
       to_regclass('public.users') IS NOT NULL AS users,
+      (
+        SELECT COUNT(*) = 2
+        FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name = 'users'
+          AND column_name IN (
+            'terms_accepted_version',
+            'terms_accepted_at'
+          )
+      ) AS users_terms_consent,
       to_regclass('public.auth_sessions') IS NOT NULL AS auth_sessions,
       to_regclass('public.email_verification_tokens') IS NOT NULL
         AS email_verification_tokens,
@@ -488,6 +546,7 @@ export async function authDatabaseSchemaStatus(
   return {
     ready: Boolean(
       row?.users &&
+        row.users_terms_consent &&
         row.auth_sessions &&
         row.email_verification_tokens,
     ),

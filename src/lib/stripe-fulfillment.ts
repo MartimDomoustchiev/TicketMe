@@ -94,8 +94,25 @@ export async function recordPaidCheckout(
       reservation = await attachCheckoutSession({
         reservationId,
         stripeCheckoutSessionId: session.id,
+        stripeLivemode: session.livemode,
       });
     }
+  }
+
+  // Reservations attached before migration 009 have a trusted Session ID but
+  // no persisted mode. Backfill from the signed/retrieved Stripe object before
+  // fulfillment so the issued ticket never inherits deployment-time config.
+  if (
+    reservation &&
+    typeof reservation.stripeLivemode !== "boolean" &&
+    (reservation.status === "reserved" ||
+      reservation.status === "checkout_created")
+  ) {
+    reservation = await attachCheckoutSession({
+      reservationId,
+      stripeCheckoutSessionId: session.id,
+      stripeLivemode: session.livemode,
+    });
   }
 
   if (!reservation || reservation.id !== reservationId) {

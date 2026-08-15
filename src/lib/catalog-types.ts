@@ -169,10 +169,13 @@ export type CatalogEventRecord = {
   reviewNote: string | null;
   createdAt: string;
   updatedAt: string;
-  primarySource: Pick<
-    CatalogEventSourceRecord,
-    "provider" | "providerEventId" | "sourceUrl" | "isOfficial"
-  > | null;
+  primarySource:
+    | (Pick<
+        CatalogEventSourceRecord,
+        "provider" | "providerEventId" | "sourceUrl" | "isOfficial"
+      > &
+        Partial<Pick<CatalogEventSourceRecord, "extractedFacts">>)
+    | null;
 };
 
 export type EventDiscoveryRunRecord = {

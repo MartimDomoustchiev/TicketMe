@@ -17,6 +17,11 @@ import {
   listPendingCatalogEvents,
 } from "@/lib/catalog-postgres";
 import { isDatabaseConfigured } from "@/lib/database";
+import {
+  readConfiguredFeedCount,
+  readDiscoveryFeedOutcomes,
+  type DiscoveryFeedOutcome,
+} from "@/lib/discovery-run-metadata";
 import { getLocale, localizeHref } from "@/lib/i18n";
 
 export const dynamic = "force-dynamic";
@@ -197,6 +202,13 @@ export default async function DiscoveryAdminPage() {
                               },
                             ).format(new Date(run.startedAt))}
                           </p>
+                          <FeedOutcomes
+                            outcomes={readDiscoveryFeedOutcomes(run.metadata)}
+                            configuredCount={readConfiguredFeedCount(
+                              run.metadata,
+                            )}
+                            copy={copy}
+                          />
                         </div>
                         <span className="font-bold text-slate-600">
                           {run.eventsCreated} + {run.eventsUpdated}
@@ -210,7 +222,7 @@ export default async function DiscoveryAdminPage() {
                                 : "bg-blue-50 text-blue-700"
                           }`}
                         >
-                          {run.status}
+                          {copy.runStatus[run.status]}
                         </span>
                       </div>
                     ))
@@ -247,6 +259,21 @@ const DISCOVERY_COPY = {
     empty: "Няма събития, които чакат преглед.",
     runsTitle: "Последни изпълнения",
     noRuns: "Discovery pipeline-ът още не е стартиран.",
+    feeds: "Статус на източниците",
+    legacyFeedStatus: (count: number) =>
+      `Няма запазени резултати по източник (${count} конфигурирани).`,
+    feedSummary: (succeeded: number, failed: number, pending: number) =>
+      `${succeeded} успешни · ${failed} неуспешни · ${pending} чакащи`,
+    feedStatus: {
+      succeeded: "успешен",
+      failed: "неуспешен",
+      pending: "чака",
+    },
+    runStatus: {
+      completed: "завършено",
+      failed: "неуспешно",
+      running: "в процес",
+    },
   },
   en: {
     back: "Back to admin",
@@ -263,5 +290,79 @@ const DISCOVERY_COPY = {
     empty: "There are no events awaiting review.",
     runsTitle: "Recent runs",
     noRuns: "The discovery pipeline has not run yet.",
+    feeds: "Feed status",
+    legacyFeedStatus: (count: number) =>
+      `Per-feed outcomes were not recorded (${count} configured).`,
+    feedSummary: (succeeded: number, failed: number, pending: number) =>
+      `${succeeded} succeeded · ${failed} failed · ${pending} pending`,
+    feedStatus: {
+      succeeded: "succeeded",
+      failed: "failed",
+      pending: "pending",
+    },
+    runStatus: {
+      completed: "completed",
+      failed: "failed",
+      running: "running",
+    },
   },
 } as const;
+
+type DiscoveryCopy = (typeof DISCOVERY_COPY)["bg" | "en"];
+
+function FeedOutcomes({
+  outcomes,
+  configuredCount,
+  copy,
+}: {
+  outcomes: DiscoveryFeedOutcome[] | null;
+  configuredCount: number | null;
+  copy: DiscoveryCopy;
+}) {
+  if (!outcomes) {
+    return configuredCount === null ? null : (
+      <p className="mt-2 text-xs text-slate-500">
+        {copy.legacyFeedStatus(configuredCount)}
+      </p>
+    );
+  }
+
+  const counts = {
+    succeeded: outcomes.filter((outcome) => outcome.status === "succeeded")
+      .length,
+    failed: outcomes.filter((outcome) => outcome.status === "failed").length,
+    pending: outcomes.filter((outcome) => outcome.status === "pending").length,
+  };
+
+  return (
+    <details className="mt-2 text-xs text-slate-600">
+      <summary className="cursor-pointer font-bold text-slate-700">
+        {copy.feeds}: {copy.feedSummary(
+          counts.succeeded,
+          counts.failed,
+          counts.pending,
+        )}
+      </summary>
+      <ul className="mt-2 space-y-1.5">
+        {outcomes.map((outcome) => (
+          <li
+            key={outcome.feedUrl}
+            className="flex flex-wrap items-center gap-x-2 rounded-lg bg-slate-50 px-2.5 py-2"
+          >
+            <span className="font-mono text-[11px] text-slate-700">
+              {outcome.feedUrl}
+            </span>
+            <span className="font-black">
+              {copy.feedStatus[outcome.status]}
+            </span>
+            {outcome.failureCode && (
+              <code className="text-[11px] text-rose-700">
+                {outcome.failureCode}
+              </code>
+            )}
+          </li>
+        ))}
+      </ul>
+    </details>
+  );
+}

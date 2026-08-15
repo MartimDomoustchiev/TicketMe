@@ -154,6 +154,18 @@ test("database readiness requires schema objects and runtime privileges", async 
   );
   assert.match(queries[0], /purchase_queue_position_seq/);
   assert.match(queries[0], /catalog_event_sources_id_seq/);
+  assert.match(
+    queries[0],
+    /COUNT\(\*\) = 18[\s\S]*purchase_offer_kind[\s\S]*purchase_source_url/,
+  );
+  assert.match(
+    queries[0],
+    /checkout_reservations_purchase_snapshot_valid[\s\S]*tickets_purchase_snapshot_valid/,
+  );
+  assert.match(
+    queries[0],
+    /column_name = 'stripe_livemode'[\s\S]*checkout_reservations[\s\S]*tickets/,
+  );
 
   const missingQueueLockPrivilege = await databaseSchemaStatus(
     statusClient({

@@ -14,34 +14,28 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { MarketplaceFooter } from "@/components/marketplace/MarketplaceFooter";
 import { MarketplaceHeader } from "@/components/marketplace/MarketplaceHeader";
+import {
+  localizedEventTitle,
+  localizeCity,
+} from "@/components/marketplace/catalog-ui";
 import { isAdminSession } from "@/lib/auth";
 import {
   CATALOG_EVENTS,
-  formatPrice,
   getEventById,
-  getTicketType,
-  type CatalogEvent,
 } from "@/lib/event";
 import { getLocale, localizeHref, type Locale } from "@/lib/i18n";
 import { listTickets, type StoredTicket } from "@/lib/store";
+import {
+  buildAdminTicketMetrics,
+  buildAdmissionEventSummaries,
+  formatMoneyTotal,
+  formatMoneyTotals,
+  historicalTicketView,
+} from "@/lib/ticket-history";
 
 export const dynamic = "force-dynamic";
 
-const NUMBER_FORMATTER = new Intl.NumberFormat("bg-BG");
-const ISSUED_AT_FORMATTER = new Intl.DateTimeFormat("bg-BG", {
-  dateStyle: "medium",
-  timeStyle: "short",
-  timeZone: "Europe/Sofia",
-});
-
 type StatusFilter = "all" | "issued" | "checked_in";
-
-type EventSummary = {
-  event: CatalogEvent;
-  capacity: number;
-  sold: number;
-  gross: number;
-};
 
 export default async function AdminPage({
   searchParams,
@@ -65,8 +59,25 @@ export default async function AdminPage({
   }
 
   const [tickets, filters] = await Promise.all([listTickets(), searchParams]);
+  const copy = ADMIN_COPY[locale];
+  const numberFormatter = new Intl.NumberFormat(
+    locale === "en" ? "en-GB" : "bg-BG",
+  );
+  const eventDateFormatter = new Intl.DateTimeFormat(
+    locale === "en" ? "en-GB" : "bg-BG",
+    {
+      dateStyle: "medium",
+      timeZone: "Europe/Sofia",
+    },
+  );
   const query = filters.q?.trim() ?? "";
-  const normalizedQuery = query.toLocaleLowerCase("bg-BG");
+  const languageTag = locale === "en" ? "en-GB" : "bg-BG";
+  const issuedAtFormatter = new Intl.DateTimeFormat(languageTag, {
+    dateStyle: "medium",
+    timeStyle: "short",
+    timeZone: "Europe/Sofia",
+  });
+  const normalizedQuery = query.toLocaleLowerCase(languageTag);
   const selectedStatus: StatusFilter =
     filters.status === "issued" || filters.status === "checked_in"
       ? filters.status
@@ -74,16 +85,19 @@ export default async function AdminPage({
   const selectedEventId = getEventById(filters.event ?? "")?.id ?? "all";
 
   const filteredTickets = tickets.filter((ticket) => {
+    const history = historicalTicketView(ticket);
     const matchesQuery =
       !normalizedQuery ||
       [
         ticket.id,
         ticket.buyerName,
         ticket.buyerEmail,
-        ticket.eventName,
+        history.eventName,
+        history.ticketLabel ?? "",
+        history.sourceName ?? "",
         ticket.seatLabel,
       ].some((value) =>
-        value.toLocaleLowerCase("bg-BG").includes(normalizedQuery),
+        value.toLocaleLowerCase(languageTag).includes(normalizedQuery),
       );
     const matchesStatus =
       selectedStatus === "all" || ticket.status === selectedStatus;
@@ -93,20 +107,13 @@ export default async function AdminPage({
     return matchesQuery && matchesStatus && matchesEvent;
   });
 
-  const eventSummaries = buildEventSummaries(tickets);
-  const totalCapacity = eventSummaries.reduce(
-    (sum, summary) => sum + summary.capacity,
-    0,
+  const now = new Date();
+  const eventSummaries = buildAdmissionEventSummaries(
+    tickets,
+    CATALOG_EVENTS,
+    now,
   );
-  const checkedIn = tickets.filter(
-    (ticket) =>
-      ticket.status === "checked_in" &&
-      getEventById(ticket.eventId)?.checkoutMode !== "test-simulation",
-  ).length;
-  const gross = eventSummaries.reduce(
-    (sum, summary) => sum + summary.gross,
-    0,
-  );
+  const metrics = buildAdminTicketMetrics(tickets, CATALOG_EVENTS, now);
 
   return (
     <div className="flex min-h-screen flex-col bg-slate-50 text-slate-950">
@@ -118,14 +125,13 @@ export default async function AdminPage({
             <div className="flex flex-wrap items-end justify-between gap-6">
               <div>
                 <p className="text-sm font-black uppercase tracking-[0.16em] text-blue-300">
-                  Организаторски панел
+                  {copy.eyebrow}
                 </p>
                 <h1 className="mt-3 text-3xl font-black tracking-tight sm:text-4xl">
-                  Продажби и достъп
+                  {copy.title}
                 </h1>
                 <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-300 sm:text-base">
-                  Единен преглед на {NUMBER_FORMATTER.format(CATALOG_EVENTS.length)}{" "}
-                  събития, издадените билети и проверките на входа.
+                  {copy.summary(numberFormatter.format(metrics.activeEventCount))}
                 </p>
               </div>
 
@@ -135,60 +141,68 @@ export default async function AdminPage({
                   className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-white/10 px-4 text-sm font-black text-white ring-1 ring-white/15 transition hover:bg-white/15"
                 >
                   <Sparkles size={18} aria-hidden="true" />
-                  AI откриване
+                  {copy.discovery}
                 </Link>
                 <Link
                   href={localizeHref(locale, "/admin/check-in")}
                   className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-[#2457ff] px-4 text-sm font-black text-white transition hover:bg-blue-700"
                 >
                   <ScanLine size={18} aria-hidden="true" />
-                  Проверка на билет
+                  {copy.checkIn}
                 </Link>
                 <a
                   href="/api/admin/tickets"
                   className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-white/10 px-4 text-sm font-black text-white ring-1 ring-white/15 transition hover:bg-white/15"
                 >
                   <Download size={18} aria-hidden="true" />
-                  JSON отчет
+                  {copy.jsonReport}
                 </a>
               </div>
             </div>
           </section>
 
           <section
-            aria-label="Ключови показатели"
+            aria-label={copy.metricsAria}
             className="mt-5 grid gap-4 sm:grid-cols-2 xl:grid-cols-4"
           >
             <MetricCard
               icon={<Ticket size={21} aria-hidden="true" />}
-              label="Издадени билети"
-              value={NUMBER_FORMATTER.format(tickets.length)}
-              note={`${NUMBER_FORMATTER.format(Math.max(0, totalCapacity - tickets.length))} свободни места`}
+              label={copy.admissionTickets}
+              value={numberFormatter.format(metrics.admissionTicketCount)}
+              note={copy.remainingSeats(
+                numberFormatter.format(metrics.remainingAdmissionCapacity),
+              )}
               tone="blue"
             />
             <MetricCard
               icon={<WalletCards size={21} aria-hidden="true" />}
-              label="Стойност на поръчките"
-              value={formatPrice(gross)}
-              note="Сума по издадените билети"
+              label={copy.orderValue}
+              value={formatMoneyTotals(
+                metrics.admissionGross,
+                locale,
+                formatMoneyTotal(0, "EUR", locale),
+              )}
+              note={copy.orderValueNote}
               tone="violet"
             />
             <MetricCard
               icon={<ScanLine size={21} aria-hidden="true" />}
-              label="Преминали вход"
-              value={NUMBER_FORMATTER.format(checkedIn)}
+              label={copy.checkedIn}
+              value={numberFormatter.format(metrics.checkedInAdmissionCount)}
               note={
-                tickets.length
-                  ? `${Math.round((checkedIn / tickets.length) * 100)}% от издадените`
-                  : "Все още няма проверки"
+                metrics.admissionTicketCount
+                  ? copy.checkedInPercent(metrics.checkInPercent)
+                  : copy.noCheckIns
               }
               tone="emerald"
             />
             <MetricCard
               icon={<CalendarDays size={21} aria-hidden="true" />}
-              label="Активни събития"
-              value={NUMBER_FORMATTER.format(CATALOG_EVENTS.length)}
-              note={`${NUMBER_FORMATTER.format(totalCapacity)} места общ капацитет`}
+              label={copy.activeEvents}
+              value={numberFormatter.format(metrics.activeEventCount)}
+              note={copy.admissionCapacity(
+                numberFormatter.format(metrics.activeAdmissionCapacity),
+              )}
               tone="amber"
             />
           </section>
@@ -197,17 +211,17 @@ export default async function AdminPage({
             <div className="flex flex-wrap items-end justify-between gap-4 border-b border-slate-200 px-5 py-5 sm:px-6">
               <div>
                 <h2 className="text-xl font-black tracking-tight">
-                  Портфолио от събития
+                  {copy.portfolioTitle}
                 </h2>
                 <p className="mt-1 text-sm text-slate-600">
-                  Капацитет и продажби за целия каталог.
+                  {copy.portfolioText}
                 </p>
               </div>
               <Link
                 href={localizeHref(locale, "/events")}
                 className="text-sm font-black text-[#2457ff] hover:text-blue-800"
               >
-                Към публичния каталог
+                {copy.publicCatalogue}
               </Link>
             </div>
 
@@ -215,11 +229,11 @@ export default async function AdminPage({
               <table className="w-full min-w-[760px] border-collapse text-left">
                 <thead className="sticky top-0 z-10 bg-slate-100 text-xs font-black uppercase tracking-wide text-slate-500">
                   <tr>
-                    <th className="px-5 py-3">Събитие</th>
-                    <th className="px-5 py-3">Дата</th>
-                    <th className="px-5 py-3">Продадени</th>
-                    <th className="px-5 py-3">Капацитет</th>
-                    <th className="px-5 py-3">Стойност</th>
+                    <th className="px-5 py-3">{copy.event}</th>
+                    <th className="px-5 py-3">{copy.date}</th>
+                    <th className="px-5 py-3">{copy.sold}</th>
+                    <th className="px-5 py-3">{copy.capacity}</th>
+                    <th className="px-5 py-3">{copy.value}</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 text-sm">
@@ -244,19 +258,21 @@ export default async function AdminPage({
                             )}
                             className="font-black text-slate-950 hover:text-[#2457ff]"
                           >
-                            {summary.event.name}
+                            {localizedEventTitle(summary.event, locale)}
                           </Link>
                           <p className="mt-1 text-xs text-slate-500">
-                            {summary.event.city} · {summary.event.venue}
+                            {localizeCity(summary.event.city, locale)} · {summary.event.venue}
                           </p>
                         </td>
                         <td className="whitespace-nowrap px-5 py-4 font-semibold text-slate-700">
-                          {summary.event.date}
+                          {eventDateFormatter.format(
+                            new Date(summary.event.startsAt),
+                          )}
                         </td>
                         <td className="px-5 py-4">
                           <div className="flex items-center gap-3">
                             <span className="w-10 font-black">
-                              {NUMBER_FORMATTER.format(summary.sold)}
+                              {numberFormatter.format(summary.sold)}
                             </span>
                             <div className="h-1.5 w-20 overflow-hidden rounded-full bg-slate-200">
                               <div
@@ -267,10 +283,14 @@ export default async function AdminPage({
                           </div>
                         </td>
                         <td className="px-5 py-4 font-semibold text-slate-700">
-                          {NUMBER_FORMATTER.format(summary.capacity)}
+                          {numberFormatter.format(summary.capacity)}
                         </td>
                         <td className="whitespace-nowrap px-5 py-4 font-black">
-                          {formatPrice(summary.gross)}
+                          {formatMoneyTotals(
+                            summary.gross,
+                            locale,
+                            formatMoneyTotal(0, summary.event.currency, locale),
+                          )}
                         </td>
                       </tr>
                     );
@@ -283,10 +303,10 @@ export default async function AdminPage({
           <section className="mt-7 overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
             <div className="border-b border-slate-200 px-5 py-5 sm:px-6">
               <h2 className="text-xl font-black tracking-tight">
-                Издадени билети
+                {copy.issuedTickets}
               </h2>
               <p className="mt-1 text-sm text-slate-600">
-                Търсене по купувач, билет, място или събитие.
+                {copy.ticketSearchText}
               </p>
 
               <form
@@ -295,7 +315,7 @@ export default async function AdminPage({
                 className="mt-5 grid gap-3 lg:grid-cols-[1fr_220px_180px_auto]"
               >
                 <label className="relative">
-                  <span className="sr-only">Търсене в билетите</span>
+                  <span className="sr-only">{copy.ticketSearchLabel}</span>
                   <Search
                     size={18}
                     aria-hidden="true"
@@ -305,37 +325,37 @@ export default async function AdminPage({
                     name="q"
                     type="search"
                     defaultValue={query}
-                    placeholder="Име, имейл, билет или събитие"
+                    placeholder={copy.ticketSearchPlaceholder}
                     className="h-11 w-full rounded-xl border border-slate-300 bg-white pl-10 pr-3 text-sm font-semibold outline-none transition focus:border-[#2457ff] focus:ring-4 focus:ring-blue-100"
                   />
                 </label>
 
                 <label>
-                  <span className="sr-only">Събитие</span>
+                  <span className="sr-only">{copy.eventFilterLabel}</span>
                   <select
                     name="event"
                     defaultValue={selectedEventId}
                     className="h-11 w-full rounded-xl border border-slate-300 bg-white px-3 text-sm font-semibold outline-none transition focus:border-[#2457ff] focus:ring-4 focus:ring-blue-100"
                   >
-                    <option value="all">Всички събития</option>
+                    <option value="all">{copy.allEvents}</option>
                     {CATALOG_EVENTS.map((event) => (
                       <option key={event.id} value={event.id}>
-                        {event.name}
+                        {localizedEventTitle(event, locale)}
                       </option>
                     ))}
                   </select>
                 </label>
 
                 <label>
-                  <span className="sr-only">Статус</span>
+                  <span className="sr-only">{copy.statusFilterLabel}</span>
                   <select
                     name="status"
                     defaultValue={selectedStatus}
                     className="h-11 w-full rounded-xl border border-slate-300 bg-white px-3 text-sm font-semibold outline-none transition focus:border-[#2457ff] focus:ring-4 focus:ring-blue-100"
                   >
-                    <option value="all">Всички статуси</option>
-                    <option value="issued">Издаден / тестов запис</option>
-                    <option value="checked_in">Използван</option>
+                    <option value="all">{copy.allStatuses}</option>
+                    <option value="issued">{copy.issuedStatusFilter}</option>
+                    <option value="checked_in">{copy.usedStatusFilter}</option>
                   </select>
                 </label>
 
@@ -344,7 +364,7 @@ export default async function AdminPage({
                     type="submit"
                     className="inline-flex h-11 flex-1 items-center justify-center rounded-xl bg-[#10172a] px-4 text-sm font-black text-white transition hover:bg-[#2457ff]"
                   >
-                    Филтрирай
+                    {copy.filter}
                   </button>
                   {(query ||
                     selectedStatus !== "all" ||
@@ -353,7 +373,7 @@ export default async function AdminPage({
                       href={localizeHref(locale, "/admin")}
                       className="inline-flex h-11 items-center justify-center rounded-xl border border-slate-300 px-3 text-sm font-black text-slate-700 transition hover:bg-slate-50"
                     >
-                      Изчисти
+                      {copy.clear}
                     </Link>
                   )}
                 </div>
@@ -362,14 +382,14 @@ export default async function AdminPage({
 
             <div className="flex items-center justify-between gap-4 bg-slate-50 px-5 py-3 text-sm text-slate-600 sm:px-6">
               <span>
-                Показани{" "}
+                {copy.shown}{" "}
                 <strong className="text-slate-950">
-                  {NUMBER_FORMATTER.format(filteredTickets.length)}
+                  {numberFormatter.format(filteredTickets.length)}
                 </strong>{" "}
-                от {NUMBER_FORMATTER.format(tickets.length)}
+                {copy.outOf} {numberFormatter.format(tickets.length)}
               </span>
               <span className="hidden font-semibold sm:inline">
-                Чувствителните ключове не се показват
+                {copy.keysHidden}
               </span>
             </div>
 
@@ -379,10 +399,10 @@ export default async function AdminPage({
                   <Ticket size={23} aria-hidden="true" />
                 </span>
                 <h3 className="mt-4 text-lg font-black">
-                  Няма намерени билети
+                  {copy.noTickets}
                 </h3>
                 <p className="mt-1 text-sm text-slate-600">
-                  Промени филтрите или провери отново след нова поръчка.
+                  {copy.noTicketsText}
                 </p>
               </div>
             ) : (
@@ -390,12 +410,12 @@ export default async function AdminPage({
                 <table className="w-full min-w-[960px] border-collapse text-left">
                   <thead className="bg-slate-100 text-xs font-black uppercase tracking-wide text-slate-500">
                     <tr>
-                      <th className="px-5 py-3">Билет</th>
-                      <th className="px-5 py-3">Събитие</th>
-                      <th className="px-5 py-3">Купувач</th>
-                      <th className="px-5 py-3">Категория</th>
-                      <th className="px-5 py-3">Издаден</th>
-                      <th className="px-5 py-3">Статус</th>
+                      <th className="px-5 py-3">{copy.ticket}</th>
+                      <th className="px-5 py-3">{copy.event}</th>
+                      <th className="px-5 py-3">{copy.buyer}</th>
+                      <th className="px-5 py-3">{copy.category}</th>
+                      <th className="px-5 py-3">{copy.issued}</th>
+                      <th className="px-5 py-3">{copy.status}</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 text-sm">
@@ -404,6 +424,8 @@ export default async function AdminPage({
                         key={ticket.id}
                         ticket={ticket}
                         locale={locale}
+                        copy={copy}
+                        issuedAtFormatter={issuedAtFormatter}
                       />
                     ))}
                   </tbody>
@@ -419,50 +441,38 @@ export default async function AdminPage({
   );
 }
 
-function buildEventSummaries(tickets: StoredTicket[]): EventSummary[] {
-  const ticketsByEvent = new Map<string, StoredTicket[]>();
-
-  for (const ticket of tickets) {
-    const eventTickets = ticketsByEvent.get(ticket.eventId) ?? [];
-    eventTickets.push(ticket);
-    ticketsByEvent.set(ticket.eventId, eventTickets);
-  }
-
-  return CATALOG_EVENTS.map((event) => {
-    const eventTickets = ticketsByEvent.get(event.id) ?? [];
-    const capacity = event.ticketTypes.reduce(
-      (sum, type) => sum + type.capacity,
-      0,
-    );
-    const gross = eventTickets.reduce(
-      (sum, ticket) =>
-        sum + getTicketType(event.id, ticket.ticketType).price,
-      0,
-    );
-
-    return {
-      event,
-      capacity,
-      sold: eventTickets.length,
-      gross,
-    };
-  }).sort(
-    (left, right) =>
-      right.sold - left.sold ||
-      left.event.startsAt.localeCompare(right.event.startsAt),
-  );
-}
-
 function TicketRow({
   ticket,
   locale,
+  copy,
+  issuedAtFormatter,
 }: {
   ticket: StoredTicket;
   locale: Locale;
+  copy: AdminCopy;
+  issuedAtFormatter: Intl.DateTimeFormat;
 }) {
-  const type = getTicketType(ticket.eventId, ticket.ticketType);
   const event = getEventById(ticket.eventId);
-  const simulation = event?.checkoutMode === "test-simulation";
+  const history = historicalTicketView(ticket);
+  const simulation = history.offerKind === "test-simulation";
+  const legacy = !history.trustedSnapshot;
+  const amount =
+    history.unitAmountMinor !== null && history.currency
+      ? `${formatMoneyTotal(history.unitAmountMinor, history.currency, locale)} · ${
+          history.paymentMode === "test"
+            ? copy.testAmount
+            : history.paymentMode === "live"
+              ? copy.livePayment
+              : copy.paymentModeUnknown
+        }`
+      : copy.unavailable;
+  const statusLabel = simulation
+    ? copy.testStatus
+    : legacy
+      ? copy.legacyStatus
+      : ticket.status === "checked_in"
+        ? copy.usedStatus
+        : copy.validStatus;
 
   return (
     <tr className="transition hover:bg-slate-50">
@@ -481,29 +491,33 @@ function TicketRow({
             href={localizeHref(locale, `/events/${event.slug}`)}
             className="font-black text-slate-950 hover:text-[#2457ff]"
           >
-            {ticket.eventName}
+            {history.eventName}
           </Link>
         ) : (
-          <span className="font-black">{ticket.eventName}</span>
+          <span className="font-black">{history.eventName}</span>
         )}
-        <p className="mt-1 text-xs text-slate-500">{ticket.eventDate}</p>
+        <p className="mt-1 text-xs text-slate-500">{history.eventDate}</p>
       </td>
       <td className="px-5 py-4">
         <p className="font-black">{ticket.buyerName}</p>
         <p className="mt-1 text-xs text-slate-500">{ticket.buyerEmail}</p>
       </td>
       <td className="px-5 py-4">
-        <p className="font-black">{type.label}</p>
-        <p className="mt-1 text-xs text-slate-500">{type.priceLabel}</p>
+        <p className="font-black">
+          {history.ticketLabel ?? copy.unavailable}
+        </p>
+        <p className="mt-1 text-xs text-slate-500">{amount}</p>
       </td>
       <td className="whitespace-nowrap px-5 py-4 font-semibold text-slate-700">
-        {ISSUED_AT_FORMATTER.format(new Date(ticket.issuedAt))}
+        {issuedAtFormatter.format(new Date(ticket.issuedAt))}
       </td>
       <td className="px-5 py-4">
         <span
           className={`inline-flex items-center gap-2 rounded-full px-2.5 py-1 text-xs font-black ${
             simulation
               ? "bg-amber-50 text-amber-900"
+              : legacy
+              ? "bg-rose-50 text-rose-800"
               : ticket.status === "checked_in"
               ? "bg-slate-100 text-slate-700"
               : "bg-emerald-50 text-emerald-800"
@@ -511,21 +525,143 @@ function TicketRow({
         >
           {simulation ? (
             <TriangleAlert size={14} aria-hidden="true" />
+          ) : legacy ? (
+            <TriangleAlert size={14} aria-hidden="true" />
           ) : ticket.status === "checked_in" ? (
             <CheckCircle2 size={14} aria-hidden="true" />
           ) : (
             <Circle size={14} aria-hidden="true" />
           )}
-          {simulation
-            ? "Тестов - не важи за вход"
-            : ticket.status === "checked_in"
-              ? "Използван"
-              : "Валиден"}
+          {statusLabel}
         </span>
       </td>
     </tr>
   );
 }
+
+const ADMIN_COPY = {
+  bg: {
+    eyebrow: "Организаторски панел",
+    title: "Продажби и достъп",
+    summary: (count: string) =>
+      `Преглед на ${count} активни събития, издадените билети за вход и проверките на входа.`,
+    discovery: "AI откриване",
+    checkIn: "Проверка на билет",
+    jsonReport: "JSON отчет",
+    metricsAria: "Ключови показатели",
+    admissionTickets: "Билети за вход",
+    remainingSeats: (count: string) => `${count} свободни места за вход`,
+    orderValue: "Реални приходи от билети",
+    orderValueNote: "Само потвърдени Stripe live плащания",
+    checkedIn: "Преминали вход",
+    checkedInPercent: (percent: number) =>
+      `${percent}% от билетите за вход`,
+    noCheckIns: "Все още няма проверки на входа",
+    activeEvents: "Активни събития",
+    admissionCapacity: (count: string) =>
+      `${count} места в активни събития с вход`,
+    portfolioTitle: "Активни събития с билети за вход",
+    portfolioText: "Капацитет, издадени билети и Stripe live приходи без тестови симулации и минали събития.",
+    publicCatalogue: "Към публичния каталог",
+    event: "Събитие",
+    date: "Дата",
+    sold: "Издадени",
+    capacity: "Капацитет",
+    value: "Стойност",
+    issuedTickets: "Издадени билети",
+    ticketSearchText:
+      "Търсене по купувач, билет, място или запазените данни от покупката.",
+    ticketSearchLabel: "Търсене в билетите",
+    ticketSearchPlaceholder: "Име, имейл, билет или събитие",
+    eventFilterLabel: "Събитие",
+    allEvents: "Всички събития",
+    statusFilterLabel: "Статус",
+    allStatuses: "Всички статуси",
+    issuedStatusFilter: "Издаден / тестов запис",
+    usedStatusFilter: "Използван",
+    filter: "Филтрирай",
+    clear: "Изчисти",
+    shown: "Показани",
+    outOf: "от",
+    keysHidden: "Чувствителните ключове не се показват",
+    noTickets: "Няма намерени билети",
+    noTicketsText: "Промени филтрите или провери отново след нова поръчка.",
+    ticket: "Билет",
+    buyer: "Купувач",
+    category: "Категория",
+    issued: "Издаден",
+    status: "Статус",
+    testStatus: "Тестов - не важи за вход",
+    legacyStatus: "Стар запис - непотвърден",
+    usedStatus: "Използван",
+    validStatus: "Валиден билет за вход",
+    unavailable: "Няма надеждни данни",
+    testAmount: "тестова сума",
+    livePayment: "реално плащане",
+    paymentModeUnknown: "неизвестен режим",
+  },
+  en: {
+    eyebrow: "Organizer dashboard",
+    title: "Sales and admission",
+    summary: (count: string) =>
+      `Overview of ${count} active events, issued admission tickets, and venue check-ins.`,
+    discovery: "AI discovery",
+    checkIn: "Check ticket",
+    jsonReport: "JSON report",
+    metricsAria: "Key metrics",
+    admissionTickets: "Admission tickets",
+    remainingSeats: (count: string) => `${count} admission seats remaining`,
+    orderValue: "Live admission revenue",
+    orderValueNote: "Confirmed Stripe live payments only",
+    checkedIn: "Checked in",
+    checkedInPercent: (percent: number) =>
+      `${percent}% of admission tickets`,
+    noCheckIns: "No admission check-ins yet",
+    activeEvents: "Active events",
+    admissionCapacity: (count: string) =>
+      `${count} seats in active admission events`,
+    portfolioTitle: "Active admission portfolio",
+    portfolioText: "Capacity, issued tickets, and Stripe live revenue without test simulations or past events.",
+    publicCatalogue: "Open public catalogue",
+    event: "Event",
+    date: "Date",
+    sold: "Issued",
+    capacity: "Capacity",
+    value: "Value",
+    issuedTickets: "Issued tickets",
+    ticketSearchText: "Search by buyer, ticket, seat, or historical snapshot.",
+    ticketSearchLabel: "Search tickets",
+    ticketSearchPlaceholder: "Name, email, ticket, or event",
+    eventFilterLabel: "Event",
+    allEvents: "All events",
+    statusFilterLabel: "Status",
+    allStatuses: "All statuses",
+    issuedStatusFilter: "Issued / test record",
+    usedStatusFilter: "Used",
+    filter: "Filter",
+    clear: "Clear",
+    shown: "Showing",
+    outOf: "of",
+    keysHidden: "Sensitive keys are never displayed",
+    noTickets: "No tickets found",
+    noTicketsText: "Change the filters or check again after a new order.",
+    ticket: "Ticket",
+    buyer: "Buyer",
+    category: "Category",
+    issued: "Issued",
+    status: "Status",
+    testStatus: "Test - not valid for entry",
+    legacyStatus: "Legacy record - unverified",
+    usedStatus: "Used",
+    validStatus: "Valid admission ticket",
+    unavailable: "Reliable data unavailable",
+    testAmount: "test amount",
+    livePayment: "live payment",
+    paymentModeUnknown: "payment mode unknown",
+  },
+} as const;
+
+type AdminCopy = (typeof ADMIN_COPY)[Locale];
 
 function MetricCard({
   icon,

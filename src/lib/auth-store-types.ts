@@ -7,6 +7,8 @@ export type StoredUser = {
   passwordHash: string;
   role: UserRole;
   emailVerifiedAt: string | null;
+  termsAcceptedVersion: string | null;
+  termsAcceptedAt: string | null;
   createdAt: string;
   updatedAt: string;
 };
