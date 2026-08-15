@@ -20,7 +20,10 @@ import {
   getPublishedCatalogEventBySlug,
   listPublishedCatalogEvents,
 } from "@/lib/catalog-postgres";
-import type { CatalogEventRecord } from "@/lib/catalog-types";
+import {
+  canPreserveTicketSellerClaim,
+  type CatalogEventRecord,
+} from "@/lib/catalog-types";
 import { isDatabaseConfigured } from "@/lib/database";
 import { singleFlight } from "@/lib/single-flight";
 
@@ -231,6 +234,7 @@ function mapDiscoveredEvent(record: CatalogEventRecord): CatalogEvent {
     ticketTypes: [],
     sourceName,
     sourceUrl: record.primarySource.sourceUrl,
+    sourceSellsTickets: false,
     saleMode: record.saleMode,
     sourceOfficial: record.primarySource.isOfficial,
     aiEnhanced: record.lastDiscoveredRunId !== null,
@@ -292,6 +296,11 @@ function preserveStaticCheckout(
     checkoutMode: staticEvent.checkoutMode,
     saleMode: staticEvent.saleMode,
     ticketTypes: staticEvent.ticketTypes,
+    sourceSellsTickets: canPreserveTicketSellerClaim(
+      staticEvent.sourceSellsTickets,
+      staticEvent.sourceUrl,
+      event.sourceUrl,
+    ),
   };
 }
 

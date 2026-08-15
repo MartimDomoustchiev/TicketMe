@@ -27,7 +27,7 @@ import {
   EVENT_CATEGORIES,
   formatDualCurrencyPrice,
   getCategoryImage,
-  isEventOpenForTicketMeCheckout,
+  isEventOpenForInternalSale,
   isTestSimulationEvent,
   type EventCategory,
 } from "@/lib/event";
@@ -46,8 +46,8 @@ export default async function Home() {
   const copy = HOME_COPY[locale];
   const popularEvents = catalogEvents.toSorted(
     (left, right) =>
-      Number(isEventOpenForTicketMeCheckout(right)) -
-        Number(isEventOpenForTicketMeCheckout(left)) ||
+      Number(isEventOpenForInternalSale(right)) -
+        Number(isEventOpenForInternalSale(left)) ||
       Number(Boolean(right.featured)) - Number(Boolean(left.featured)) ||
       (right.bangerScore ?? 0) - (left.bangerScore ?? 0) ||
       eventTimestamp(left) - eventTimestamp(right),
@@ -55,7 +55,7 @@ export default async function Home() {
   const featuredEvents = popularEvents.slice(0, 8);
   const heroEvent = featuredEvents[0];
   const checkoutEnabled = heroEvent
-    ? isEventOpenForTicketMeCheckout(heroEvent)
+    ? isEventOpenForInternalSale(heroEvent)
     : false;
   const testSimulation = heroEvent
     ? isTestSimulationEvent(heroEvent)
@@ -177,9 +177,11 @@ export default async function Home() {
                   rel="noreferrer"
                   className="inline-flex h-13 items-center justify-center gap-2 rounded-xl bg-[#2457ff] px-6 font-black text-white shadow-[0_14px_35px_rgba(36,87,255,0.35)] transition hover:-translate-y-0.5 hover:bg-blue-700 focus-visible:ring-4 focus-visible:ring-blue-300"
                 >
-                  {heroEvent.sourceOfficial
-                    ? copy.openOfficialPage
-                    : copy.openSourcePage}
+                  {heroEvent.sourceSellsTickets
+                    ? copy.buyTicketNow
+                    : heroEvent.sourceOfficial
+                      ? copy.openOfficialPage
+                      : copy.openSourcePage}
                   <ExternalLink size={18} aria-hidden="true" />
                 </a>
               )}
@@ -584,6 +586,7 @@ const HOME_COPY = {
   bg: {
     weeklyHighlight: "Акцент на седмицата",
     chooseTickets: "Купи билет",
+    buyTicketNow: "Купи билет сега",
     testPayment: "Тестово Stripe плащане",
     testPaymentText:
       "Без реално таксуване. Цените и бройките са Tiketko симулация, а PDF билетът не важи за вход.",
@@ -643,6 +646,7 @@ const HOME_COPY = {
   en: {
     weeklyHighlight: "Highlight of the week",
     chooseTickets: "Buy ticket",
+    buyTicketNow: "Buy your ticket now",
     testPayment: "Test Stripe payment",
     testPaymentText:
       "No real charge. Prices and counts are a Tiketko simulation, and the PDF ticket is not valid for venue entry.",

@@ -85,6 +85,7 @@ test("static external listings keep source facts and expose explicit test invent
     assert.equal(event.heroImage, event.image);
     assert.equal(event.saleMode, "external");
     assert.equal(event.checkoutMode, "test-simulation");
+    assert.equal(event.sourceSellsTickets, true);
     assert.equal(event.ticketTypes.length, 3);
     assert.deepEqual(
       event.ticketTypes.map((ticketType) => ticketType.id),
@@ -128,6 +129,7 @@ test("first-party event exposes explicit organizer inventory for Checkout", () =
   assert.equal(PRIMARY_SALE_EVENT.saleMode, "internal");
   assert.equal(PRIMARY_SALE_EVENT.checkoutMode, "admission");
   assert.equal(PRIMARY_SALE_EVENT.sourceName, "Tiketko");
+  assert.equal(PRIMARY_SALE_EVENT.sourceSellsTickets, true);
   assert.equal(PRIMARY_SALE_EVENT.sourceOfficial, true);
   assert.equal(PRIMARY_SALE_EVENT.priceAvailable, true);
   assert.equal(PRIMARY_SALE_EVENT.currency, "EUR");

@@ -50,13 +50,17 @@ const COPY = {
     seconds: "секунди",
     buyTicket: "Купи билет",
     testCheckout: "Тестово Stripe плащане",
-    buyAt: (source: string) => `Купи билет от ${source}`,
+    buyAt: "Купи билет сега",
+    checkAt: (source: string) => `Провери билетите в ${source}`,
     soldOut: "Изчерпано",
     backToEvents: "Разгледай събитията",
     live: "На живо",
     connecting: "Свързване",
     secureVerified: "Сигурно Stripe плащане и потвърден имейл",
-    externalSource: "Покупката се завършва при посочения източник",
+    externalSource: (source: string) =>
+      `Покупката се завършва в ${source}`,
+    attributedSource: (source: string) =>
+      `Провери актуалната наличност в ${source}`,
     testOffer: "Tiketko Stripe test оферта",
     testNotice:
       "Това е тестово плащане без реално таксуване. PDF билетът не е валиден за вход, а наличността не е официалната наличност на организатора.",
@@ -75,13 +79,17 @@ const COPY = {
     seconds: "seconds",
     buyTicket: "Buy ticket",
     testCheckout: "Test Stripe payment",
-    buyAt: (source: string) => `Buy at ${source}`,
+    buyAt: "Buy your ticket now",
+    checkAt: (source: string) => `Check tickets at ${source}`,
     soldOut: "Sold out",
     backToEvents: "Browse events",
     live: "Live",
     connecting: "Connecting",
     secureVerified: "Secure Stripe checkout and verified email",
-    externalSource: "Purchase is completed with the attributed source",
+    externalSource: (source: string) =>
+      `You’ll complete your purchase at ${source}`,
+    attributedSource: (source: string) =>
+      `Check current ticket availability at ${source}`,
     testOffer: "Tiketko Stripe test offer",
     testNotice:
       "This is a test payment with no real charge. The PDF ticket is not valid for venue entry, and these counts are not the organizer's official inventory.",
@@ -115,6 +123,7 @@ export function EventPurchasePanel({
   const remaining = availability?.totalRemaining ?? 0;
   const soldOut = availabilityAvailable && remaining <= 0;
   const testSimulation = isTestSimulationEvent(event);
+  const sourceSellsTickets = event.sourceSellsTickets === true;
   const checkoutPrice = event.ticketTypes.reduce(
     (lowest, ticketType) => Math.min(lowest, ticketType.price),
     Number.POSITIVE_INFINITY,
@@ -245,7 +254,9 @@ export function EventPurchasePanel({
                 ? copy.testCheckout
                 : copy.buyTicket
               : copy.backToEvents
-          : copy.buyAt(event.sourceName)}
+          : sourceSellsTickets
+            ? copy.buyAt
+            : copy.checkAt(event.sourceName)}
       </a>
       <p className="mt-4 flex items-center justify-center gap-2 text-center text-xs font-bold text-slate-500">
         <ShieldCheck
@@ -257,7 +268,9 @@ export function EventPurchasePanel({
           ? testSimulation
             ? copy.testNotice
             : copy.secureVerified
-          : copy.externalSource}
+          : sourceSellsTickets
+            ? copy.externalSource(event.sourceName)
+            : copy.attributedSource(event.sourceName)}
       </p>
       {event.saleMode === "external" && (
         <a

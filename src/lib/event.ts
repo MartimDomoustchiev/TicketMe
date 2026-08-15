@@ -52,6 +52,8 @@ export type CatalogEvent = {
   ticketTypes: readonly TicketType[];
   sourceName: string;
   sourceUrl: string;
+  /** True only when sourceUrl is known to support ticket purchasing. */
+  sourceSellsTickets?: boolean;
   /**
    * Admission offers represent organizer-owned inventory. Test simulations
    * exercise the complete Stripe/PDF/email flow but never grant venue entry.
@@ -520,6 +522,7 @@ function normalizeSeed(seed: EventSeed): CatalogEvent {
     ticketTypes: buildTicketTypes(seed.sourceId, legacyPriceFrom),
     sourceName: "Bilet.bg",
     sourceUrl: `https://www.bilet.bg/bg/events/${seed.slug}`,
+    sourceSellsTickets: true,
     checkoutMode: "test-simulation",
     saleMode: "external",
     sourceOfficial: false,
@@ -632,6 +635,7 @@ export const PRIMARY_SALE_EVENT: CatalogEvent = {
   sourceName: "Tiketko",
   sourceUrl:
     "https://www.tiketko.top/events/ticketme-live-next-wave-2027",
+  sourceSellsTickets: true,
   checkoutMode: "admission",
   saleMode: "internal",
   sourceOfficial: true,
@@ -663,6 +667,7 @@ export const EVENT: CatalogEvent = {
   ticketTypes: FEATURED_TICKET_TYPES,
   sourceName: "Eventim",
   sourceUrl: "https://www.eventim.bg/en/artist/deep-purple/",
+  sourceSellsTickets: true,
   checkoutMode: "test-simulation",
   saleMode: "external",
   sourceOfficial: true,

@@ -391,6 +391,25 @@ export function canonicalizeCatalogSourceUrl(value: string): string {
   return url.toString();
 }
 
+export function canPreserveTicketSellerClaim(
+  sourceSellsTickets: boolean | undefined,
+  trustedSourceUrl: string,
+  refreshedSourceUrl: string,
+): boolean {
+  if (sourceSellsTickets !== true) {
+    return false;
+  }
+
+  try {
+    return (
+      canonicalizeCatalogSourceUrl(trustedSourceUrl) ===
+      canonicalizeCatalogSourceUrl(refreshedSourceUrl)
+    );
+  } catch {
+    return false;
+  }
+}
+
 export function buildCatalogSourceUrlHash(value: string): string {
   return sha256(canonicalizeCatalogSourceUrl(value));
 }
