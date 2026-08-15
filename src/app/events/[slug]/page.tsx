@@ -90,6 +90,7 @@ export default async function EventPage({ params }: EventPageProps) {
 
   const checkoutEnabled = isEventOpenForTicketMeCheckout(event);
   const testSimulation = isTestSimulationEvent(event);
+  const paymentMode = stripeMode();
   const visual = getEventVisual(event);
   const [
     availability,
@@ -270,6 +271,7 @@ export default async function EventPage({ params }: EventPageProps) {
             event={event}
             checkoutEnabled={checkoutEnabled}
             availabilityAvailable={availability !== null}
+            paymentMode={paymentMode}
             locale={locale}
           />
         </div>
@@ -365,7 +367,7 @@ export default async function EventPage({ params }: EventPageProps) {
                 event={event}
                 initialAvailability={availability}
                 initialSession={buyerSession}
-                paymentMode={stripeMode()}
+                paymentMode={paymentMode}
                 stripePublishableKey={getStripePublishableKey()}
                 locale={locale}
               />

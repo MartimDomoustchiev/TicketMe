@@ -23,27 +23,35 @@ async function source(relativePath: string): Promise<string> {
   return readFile(path.join(process.cwd(), relativePath), "utf8");
 }
 
-const EVENT_AVAILABILITY = {
-  totalCapacity: EVENT.ticketTypes.reduce(
+function availabilityFor(event: CatalogEvent) {
+  const totalCapacity = event.ticketTypes.reduce(
     (total, ticketType) => total + ticketType.capacity,
     0,
-  ),
-  totalRemaining: EVENT.ticketTypes.reduce(
-    (total, ticketType) => total + ticketType.capacity,
-    0,
-  ),
-  byType: {
-    fan: EVENT.ticketTypes.find((ticketType) => ticketType.id === "fan")
-      ?.capacity ?? 0,
-    standard:
-      EVENT.ticketTypes.find((ticketType) => ticketType.id === "standard")
+  );
+
+  return {
+    totalCapacity,
+    totalRemaining: totalCapacity,
+    byType: {
+      fan: event.ticketTypes.find((ticketType) => ticketType.id === "fan")
         ?.capacity ?? 0,
-    premium:
-      EVENT.ticketTypes.find((ticketType) => ticketType.id === "premium")
-        ?.capacity ?? 0,
-  },
-  sold: 0,
+      standard:
+        event.ticketTypes.find((ticketType) => ticketType.id === "standard")
+          ?.capacity ?? 0,
+      premium:
+        event.ticketTypes.find((ticketType) => ticketType.id === "premium")
+          ?.capacity ?? 0,
+    },
+    sold: 0,
+  };
+}
+
+const EVENT_AVAILABILITY = availabilityFor(EVENT);
+const ADMISSION_EVENT = {
+  ...PRIMARY_SALE_EVENT,
+  startsAt: "2099-09-29T20:00:00.000Z",
 };
+const ADMISSION_AVAILABILITY = availabilityFor(ADMISSION_EVENT);
 
 const TestLiveTicketingProvider = LiveTicketingProvider as ComponentType<
   Omit<ComponentProps<typeof LiveTicketingProvider>, "children">
@@ -65,6 +73,7 @@ function renderTestCheckoutPanel(locale: "bg" | "en"): string {
           new Date("2026-07-20T12:00:00+03:00"),
         ),
         availabilityAvailable: true,
+        paymentMode: "test",
         locale,
       }),
     ),
@@ -77,7 +86,53 @@ function renderSourcePanel(event: CatalogEvent, locale: "bg" | "en"): string {
       event,
       checkoutEnabled: false,
       availabilityAvailable: false,
+      paymentMode: null,
       locale,
+    }),
+  );
+}
+
+function renderAdmissionCheckoutPanel(
+  paymentMode: "test" | "live",
+  locale: "bg" | "en" = "en",
+): string {
+  return renderToStaticMarkup(
+    createElement(
+      TestLiveTicketingProvider,
+      {
+        eventId: ADMISSION_EVENT.id,
+        initialAvailability: ADMISSION_AVAILABILITY,
+        initialActivity: { queueDepth: 0, activeCheckouts: 0 },
+      },
+      createElement(EventPurchasePanel, {
+        event: ADMISSION_EVENT,
+        checkoutEnabled: true,
+        availabilityAvailable: true,
+        paymentMode,
+        locale,
+      }),
+    ),
+  );
+}
+
+function renderTicketDesk({
+  event,
+  paymentMode,
+  initialSession = null,
+}: {
+  event: CatalogEvent;
+  paymentMode: "test" | "live";
+  initialSession?: ComponentProps<typeof TicketDesk>["initialSession"];
+}): string {
+  return renderToStaticMarkup(
+    createElement(TicketDesk, {
+      event,
+      initialAvailability: availabilityFor(event),
+      initialSession,
+      paymentMode,
+      stripePublishableKey:
+        paymentMode === "test" ? "pk_test_fixture" : "pk_live_fixture",
+      locale: "en",
     }),
   );
 }
@@ -106,6 +161,29 @@ test("Bulgarian test checkout uses the matching purchase copy", () => {
   assert.match(html, /тестово плащане без реално таксуване/);
   assert.match(html, /PDF билетът не е валиден за вход/);
   assert.match(html, /Източник на събитието: Eventim/);
+});
+
+test("first-party admission hero discloses Stripe test mode in both locales", () => {
+  const english = renderAdmissionCheckoutPanel("test", "en");
+  const bulgarian = renderAdmissionCheckoutPanel("test", "bg");
+
+  assert.match(english, /href="#tickets"[^>]*>[\s\S]*?Buy ticket<\/a>/);
+  assert.match(english, /Stripe test mode: no real money is charged/);
+  assert.match(english, /issues this Tiketko admission ticket/);
+  assert.doesNotMatch(english, /test offer|not valid for venue entry/i);
+
+  assert.match(bulgarian, /href="#tickets"[^>]*>[\s\S]*?Купи билет<\/a>/);
+  assert.match(bulgarian, /Stripe test mode: няма реално таксуване/);
+  assert.match(bulgarian, /Tiketko билет за вход/);
+  assert.doesNotMatch(bulgarian, /test оферта|не е валиден за вход/i);
+});
+
+test("first-party admission hero keeps live-mode checkout copy", () => {
+  const html = renderAdmissionCheckoutPanel("live");
+
+  assert.match(html, /href="#tickets"[^>]*>[\s\S]*?Buy ticket<\/a>/);
+  assert.match(html, /Secure Stripe checkout and verified email/);
+  assert.doesNotMatch(html, /no real money is charged|for this project/i);
 });
 
 test("source-only listings keep URL-bound purchase claims", () => {
@@ -166,46 +244,64 @@ test("public routes expose the internal test-checkout path", async () => {
 });
 
 test("Stripe test mode does not revoke a first-party admission offer", () => {
-  const event = {
-    ...PRIMARY_SALE_EVENT,
-    startsAt: "2099-09-29T20:00:00.000Z",
-  };
-  const capacity = Object.fromEntries(
-    event.ticketTypes.map((ticketType) => [
-      ticketType.id,
-      ticketType.capacity,
-    ]),
-  ) as Record<"fan" | "standard" | "premium", number>;
-  const totalCapacity = event.ticketTypes.reduce(
-    (total, ticketType) => total + ticketType.capacity,
-    0,
-  );
-  const html = renderToStaticMarkup(
-    createElement(TicketDesk, {
-      event,
-      initialAvailability: {
-        totalCapacity,
-        totalRemaining: totalCapacity,
-        byType: capacity,
-        sold: 0,
-      },
-      initialSession: {
-        email: "buyer@example.com",
-        name: "Verified Buyer",
-        verifiedAt: "2099-01-01T00:00:00.000Z",
-        expiresAt: "2099-12-31T00:00:00.000Z",
-      },
-      paymentMode: "test",
-      stripePublishableKey: "pk_test_fixture",
-      locale: "en",
-    }),
-  );
+  const html = renderTicketDesk({
+    event: ADMISSION_EVENT,
+    paymentMode: "test",
+    initialSession: {
+      email: "buyer@example.com",
+      name: "Verified Buyer",
+      verifiedAt: "2099-01-01T00:00:00.000Z",
+      expiresAt: "2099-12-31T00:00:00.000Z",
+    },
+  });
 
   assert.match(html, /Stripe test mode: no real money is charged/);
   assert.match(html, /issues the admission ticket shown above/);
   assert.match(html, /Electronic PDF ticket/);
   assert.doesNotMatch(html, /not valid for admission|not valid for entry/i);
   assert.doesNotMatch(html, /simulation data|Test standard category/i);
+});
+
+test("anonymous admission checkout discloses test mode before sign-in", () => {
+  const html = renderTicketDesk({
+    event: ADMISSION_EVENT,
+    paymentMode: "test",
+  });
+  const noticeIndex = html.indexOf(
+    "Stripe test mode: no real money is charged",
+  );
+  const signInIndex = html.indexOf("Sign in to purchase");
+
+  assert.ok(noticeIndex >= 0);
+  assert.ok(signInIndex > noticeIndex);
+  assert.match(html, /issues the admission ticket shown above/);
+  assert.match(html, /Electronic PDF ticket/);
+  assert.doesNotMatch(html, /not valid for admission|not valid for entry/i);
+  assert.doesNotMatch(html, /simulation data|Test standard category/i);
+});
+
+test("anonymous admission checkout does not show test disclosure in live mode", () => {
+  const html = renderTicketDesk({
+    event: ADMISSION_EVENT,
+    paymentMode: "live",
+  });
+
+  assert.match(html, /Sign in to purchase/);
+  assert.match(html, /Electronic PDF ticket/);
+  assert.doesNotMatch(html, /Stripe test mode|no real money is charged/i);
+});
+
+test("anonymous simulation checkout keeps its non-admission disclosure", () => {
+  const html = renderTicketDesk({
+    event: { ...EVENT, startsAt: "2099-09-29T20:00:00.000Z" },
+    paymentMode: "test",
+  });
+
+  assert.match(html, /Stripe test mode: no real money is charged/);
+  assert.match(html, /not valid for admission to the event/);
+  assert.match(html, /Test standard category/);
+  assert.match(html, /Sign in to purchase/);
+  assert.doesNotMatch(html, /issues the admission ticket shown above/);
 });
 
 test("checkout success derives simulation status from the ticket snapshot", async () => {

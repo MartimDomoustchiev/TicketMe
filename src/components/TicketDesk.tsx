@@ -274,6 +274,8 @@ export function TicketDesk({
   const copy = COPY[locale];
   const testSimulation = isTestSimulationEvent(event);
   const testPaymentMode = paymentMode === "test";
+  const showTestPaymentNotice =
+    testSimulation || testPaymentMode || stripeSession?.mode === "test";
 
   const selectedTicket = useMemo(
     () =>
@@ -550,6 +552,14 @@ export function TicketDesk({
             </p>
           </div>
 
+          {!purchaseResult && showTestPaymentNotice && (
+            <p className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs font-bold leading-5 text-amber-900">
+              {testSimulation
+                ? copy.testPayment
+                : copy.admissionTestPayment}
+            </p>
+          )}
+
           {purchaseResult ? (
             <div
               className="mt-5 rounded-2xl border border-emerald-200 bg-emerald-50 p-4"
@@ -665,13 +675,6 @@ export function TicketDesk({
                         : copy.cancelCheckout}
                     </button>
                   </div>
-                  {(stripeSession.mode === "test" || testSimulation) && (
-                    <p className="mb-3 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs font-bold leading-5 text-amber-900">
-                      {testSimulation
-                        ? copy.testPayment
-                        : copy.admissionTestPayment}
-                    </p>
-                  )}
                   <StripeEmbeddedCheckout
                     publishableKey={stripePublishableKey}
                     clientSecret={stripeSession.clientSecret}
@@ -704,13 +707,6 @@ export function TicketDesk({
                       </div>
                     </div>
                   </div>
-                  {(paymentMode === "test" || testSimulation) && (
-                    <p className="mt-3 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs font-bold leading-5 text-amber-900">
-                      {testSimulation
-                        ? copy.testPayment
-                        : copy.admissionTestPayment}
-                    </p>
-                  )}
                   <p className="mt-3 flex items-start gap-2 text-xs font-bold leading-5 text-slate-600">
                     <Clock3
                       size={16}

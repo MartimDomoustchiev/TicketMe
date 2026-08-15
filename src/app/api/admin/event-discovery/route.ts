@@ -1,4 +1,5 @@
 import { getActiveAccount } from "@/lib/auth";
+import { invalidatePublicCatalogCache } from "@/lib/catalog-cache";
 import { runEventDiscovery } from "@/lib/event-discovery";
 import { consumeRateLimit } from "@/lib/rate-limit";
 import { isSameOriginRequest } from "@/lib/request-security";
@@ -56,5 +57,10 @@ export async function POST(request: Request) {
   } catch (error) {
     console.error("Admin event discovery failed.", error);
     return jsonResponse({ error: "Event discovery failed." }, 500);
+  } finally {
+    // Discovery writes are intentionally incremental rather than one large
+    // transaction. Invalidate even after partial failure or an "unchanged"
+    // result because source attribution and translated facts may have moved.
+    invalidatePublicCatalogCache();
   }
 }
