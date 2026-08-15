@@ -12,10 +12,8 @@ import Link from "next/link";
 import { MarketplaceFooter } from "@/components/marketplace/MarketplaceFooter";
 import { MarketplaceHeader } from "@/components/marketplace/MarketplaceHeader";
 import { getBuyerSession } from "@/lib/auth";
-import { getEventById, isTestSimulationEvent } from "@/lib/event";
 import { getLocale, localizeHref } from "@/lib/i18n";
 import { getBaseUrl } from "@/lib/site";
-import { stripeMode } from "@/lib/stripe";
 import {
   getCheckoutReservationBySession,
   getTicket,
@@ -110,14 +108,15 @@ export default async function CheckoutSuccessPage({
     searchParams,
   ]);
   const english = locale === "en";
-  const testMode = stripeMode() === "test";
   const sessionId =
     typeof query.session_id === "string" ? query.session_id : "";
   const state = buyer
     ? await checkoutState(sessionId, buyer.email)
     : { ticket: null, delivered: false, processing: false };
-  const event = state.ticket ? getEventById(state.ticket.eventId) : undefined;
-  const testSimulation = Boolean(event && isTestSimulationEvent(event));
+  const testMode = state.ticket?.stripeLivemode === false;
+  const purchaseSnapshot = state.ticket?.purchaseSnapshot;
+  const testSimulation =
+    purchaseSnapshot?.offerKind === "test-simulation";
   const isOwner =
     Boolean(state.ticket && buyer) &&
     state.ticket!.buyerEmail.trim().toLowerCase() ===
@@ -184,14 +183,14 @@ export default async function CheckoutSuccessPage({
                     {english
                       ? "This PDF records your Stripe test payment. It is not valid for venue entry; use the attributed event source for official admission."
                       : "Този PDF удостоверява тестовото Stripe плащане. Не важи за вход; използвай посочения източник на събитието за официален достъп."}
-                    {event?.sourceUrl && (
+                    {purchaseSnapshot?.sourceUrl && (
                       <a
-                        href={event.sourceUrl}
+                        href={purchaseSnapshot.sourceUrl}
                         target="_blank"
                         rel="noreferrer"
                         className="ml-1 underline underline-offset-2"
                       >
-                        {event.sourceName}
+                        {purchaseSnapshot.sourceName}
                       </a>
                     )}
                   </div>

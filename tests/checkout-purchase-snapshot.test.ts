@@ -77,3 +77,17 @@ test("snapshot migration backfills only known offers and allows all-null legacy 
   assert.match(migration, /WHEN 'deep-purple-live-sofia-2026' THEN 'test-simulation'/);
   assert.match(migration, /WHERE purchase_offer_kind IS NULL/);
 });
+
+test("Stripe payment mode migration preserves unknown history instead of guessing", async () => {
+  const migration = await readFile(
+    path.join(
+      process.cwd(),
+      "database/migrations/009_stripe_payment_mode.sql",
+    ),
+    "utf8",
+  );
+
+  assert.match(migration, /ALTER TABLE checkout_reservations[\s\S]*stripe_livemode BOOLEAN/);
+  assert.match(migration, /ALTER TABLE tickets[\s\S]*stripe_livemode BOOLEAN/);
+  assert.doesNotMatch(migration, /UPDATE\s+(?:checkout_reservations|tickets)/i);
+});

@@ -11,19 +11,20 @@ import {
   Ticket as TicketIcon,
   TriangleAlert,
   UserRound,
+  WalletCards,
 } from "lucide-react";
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { MarketplaceFooter } from "@/components/marketplace/MarketplaceFooter";
 import { MarketplaceHeader } from "@/components/marketplace/MarketplaceHeader";
-import {
-  formatEventDate,
-  localizeCity,
-} from "@/components/marketplace/catalog-ui";
 import { getBuyerSession, isAdminSession } from "@/lib/auth";
-import { getEventById, getTicketType } from "@/lib/event";
+import { getEventById } from "@/lib/event";
 import { getLocale, localizeHref } from "@/lib/i18n";
 import { getTicket } from "@/lib/store";
+import {
+  formatMoneyTotal,
+  historicalTicketView,
+} from "@/lib/ticket-history";
 
 export const dynamic = "force-dynamic";
 
@@ -59,10 +60,10 @@ export default async function TicketPage({
     notFound();
   }
 
-  const type = getTicketType(ticket.eventId, ticket.ticketType);
   const event = getEventById(ticket.eventId);
-  const simulation = event?.checkoutMode === "test-simulation";
-  const sourceUrl = safeSourceUrl(event?.sourceUrl);
+  const history = historicalTicketView(ticket);
+  const simulation = history.offerKind === "test-simulation";
+  const legacy = !history.trustedSnapshot;
   const accountHref = localizeHref(
     locale,
     admin ? "/admin" : "/account/tickets",
@@ -75,16 +76,15 @@ export default async function TicketPage({
       timeZone: "Europe/Sofia",
     },
   );
-  const typeLabel =
-    simulation
-      ? type.label
-      : locale === "en"
-      ? {
-          fan: "Fan zone",
-          standard: "Standard",
-          premium: "Premium",
-        }[ticket.ticketType]
-      : type.label;
+  const typeLabel = history.ticketLabel ?? copy.unavailable;
+  const priceLabel =
+    history.unitAmountMinor !== null && history.currency
+      ? formatMoneyTotal(
+          history.unitAmountMinor,
+          history.currency,
+          locale,
+        )
+      : copy.unavailable;
 
   return (
     <div className="flex min-h-screen flex-col bg-slate-50 text-slate-950">
@@ -109,12 +109,16 @@ export default async function TicketPage({
                     className={`inline-flex items-center gap-2 rounded-full px-3 py-1 text-sm font-black ring-1 ${
                       simulation
                         ? "bg-amber-300/15 text-amber-100 ring-amber-200/25"
+                        : legacy
+                        ? "bg-rose-300/15 text-rose-100 ring-rose-200/25"
                         : ticket.status === "checked_in"
                         ? "bg-white/10 text-slate-200 ring-white/15"
                         : "bg-emerald-400/10 text-emerald-100 ring-emerald-300/20"
                     }`}
                   >
                     {simulation ? (
+                      <TriangleAlert size={16} aria-hidden="true" />
+                    ) : legacy ? (
                       <TriangleAlert size={16} aria-hidden="true" />
                     ) : ticket.status === "checked_in" ? (
                       <CheckCircle2 size={16} aria-hidden="true" />
@@ -123,12 +127,14 @@ export default async function TicketPage({
                     )}
                     {simulation
                       ? copy.testTicket
+                      : legacy
+                      ? copy.legacyTicket
                       : ticket.status === "checked_in"
                       ? copy.usedTicket
                       : copy.validTicket}
                   </p>
                   <h1 className="mt-5 max-w-2xl text-3xl font-black leading-tight tracking-tight sm:text-4xl">
-                    {ticket.eventName}
+                    {history.eventName}
                   </h1>
                   <p className="mt-2 font-semibold text-slate-300">
                     {typeLabel} · {ticket.seatLabel}
@@ -160,8 +166,30 @@ export default async function TicketPage({
                     </div>
                   </div>
                 )}
+                {legacy && (
+                  <div
+                    role="alert"
+                    className="mb-6 flex gap-3 rounded-2xl border border-rose-300 bg-rose-50 p-4 text-rose-950"
+                  >
+                    <TriangleAlert
+                      className="mt-0.5 shrink-0"
+                      size={21}
+                      aria-hidden="true"
+                    />
+                    <div>
+                      <p className="font-black">{copy.legacyNoticeTitle}</p>
+                      <p className="mt-1 text-sm leading-6">
+                        {copy.legacyNoticeText}
+                      </p>
+                    </div>
+                  </div>
+                )}
                 <h2 className="text-xl font-black">
-                  {simulation ? copy.testDetails : copy.ticketDetails}
+                  {simulation
+                    ? copy.testDetails
+                    : legacy
+                    ? copy.legacyDetails
+                    : copy.ticketDetails}
                 </h2>
                 <dl className="mt-5 grid gap-4 sm:grid-cols-2">
                   <TicketDetail
@@ -183,24 +211,23 @@ export default async function TicketPage({
                   <TicketDetail
                     icon={<CalendarDays size={18} aria-hidden="true" />}
                     label={copy.dateAndTime}
-                    value={
-                      event
-                        ? formatEventDate(event, false, locale)
-                        : ticket.eventDate
-                    }
-                    secondary={
-                      event?.time
-                        ? `${copy.starts}: ${event.time}${locale === "bg" ? " ч." : ""}`
-                        : undefined
-                    }
+                    value={history.eventDate}
                   />
                   <TicketDetail
                     icon={<MapPin size={18} aria-hidden="true" />}
                     label={copy.eventVenue}
-                    value={ticket.venue}
-                    secondary={
-                      event ? localizeCity(event.city, locale) : undefined
+                    value={history.venue}
+                  />
+                  <TicketDetail
+                    icon={<WalletCards size={18} aria-hidden="true" />}
+                    label={
+                      history.paymentMode === "test"
+                        ? copy.testAmount
+                        : history.paymentMode === "live"
+                          ? copy.pricePaid
+                          : copy.recordedAmount
                     }
+                    value={priceLabel}
                   />
                 </dl>
 
@@ -250,33 +277,49 @@ export default async function TicketPage({
                   <QrCode size={24} aria-hidden="true" />
                 </span>
                 <h2 className="mt-5 text-xl font-black">
-                  {simulation ? copy.qrVerification : copy.qrAccess}
+                  {simulation
+                    ? copy.qrVerification
+                    : legacy
+                    ? copy.qrUnavailable
+                    : copy.qrAccess}
                 </h2>
                 <p className="mt-2 text-sm leading-6 text-slate-600">
-                  {simulation ? copy.qrVerificationText : copy.qrText}
+                  {simulation
+                    ? copy.qrVerificationText
+                    : legacy
+                    ? copy.qrUnavailableText
+                    : copy.qrText}
                 </p>
                 <div className="mt-5 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm leading-6 text-amber-950">
                   <p className="font-black">
-                    {simulation ? copy.testReminder : copy.keepSafe}
+                    {simulation
+                      ? copy.testReminder
+                      : legacy
+                      ? copy.legacyReminder
+                      : copy.keepSafe}
                   </p>
                   <p className="mt-1">
-                    {simulation ? copy.testReminderText : copy.keepSafeText}
+                    {simulation
+                      ? copy.testReminderText
+                      : legacy
+                      ? copy.legacyReminderText
+                      : copy.keepSafeText}
                   </p>
                 </div>
 
-                {simulation && sourceUrl && (
+                {simulation && history.sourceUrl && history.sourceName && (
                   <a
-                    href={sourceUrl}
+                    href={history.sourceUrl}
                     target="_blank"
                     rel="noreferrer"
                     className="mt-5 inline-flex items-center gap-1.5 text-sm font-black text-[#2457ff] hover:text-blue-800"
                   >
-                    {copy.openSource(event?.sourceName ?? "")}
+                    {copy.openSource(history.sourceName)}
                     <ExternalLink size={15} aria-hidden="true" />
                   </a>
                 )}
 
-                {event && !simulation && (
+                {event && !simulation && !legacy && (
                   <Link
                     href={localizeHref(locale, `/events/${event.slug}`)}
                     className="mt-5 inline-flex text-sm font-black text-[#2457ff] hover:text-blue-800"
@@ -302,17 +345,26 @@ const TICKET_COPY = {
     usedTicket: "Билетът е използван",
     validTicket: "Валиден електронен билет",
     testTicket: "Тестов билет - не важи за вход",
+    legacyTicket: "Стар билет - непотвърден",
     ticketDetails: "Данни за билета",
     testDetails: "Данни за тестовото плащане",
+    legacyDetails: "Налични данни за стария билет",
     testNoticeTitle: "Това не е билет за достъп до събитието",
     testNoticeText:
       "PDF файлът удостоверява само тестово Stripe плащане. Не са таксувани реални средства и документът не важи за вход.",
+    legacyNoticeTitle: "Липсва надежден snapshot на покупката",
+    legacyNoticeText:
+      "Не можем да потвърдим вида на офертата, платената цена или правото на вход от този стар запис. Не разчитай на него като доказателство за вход.",
     holder: "Притежател",
     categoryAndSeat: "Категория и място",
     testTypeAndReference: "Тестова оферта и референция",
     dateAndTime: "Дата и час",
     starts: "Начало",
     eventVenue: "Място на събитието",
+    pricePaid: "Платена цена",
+    testAmount: "Тестова сума",
+    recordedAmount: "Записана сума",
+    unavailable: "Няма надеждни данни",
     ticketNumber: "Номер на билета",
     issuedOn: "Издаден на",
     downloadPdf: "Изтегли PDF билет",
@@ -321,6 +373,9 @@ const TICKET_COPY = {
     qrVerification: "Проверка на тестовата транзакция",
     qrVerificationText:
       "QR кодът в PDF файла служи само за проверка на тестовата транзакция. Не го показвай на входа като билет.",
+    qrUnavailable: "Проверката не е налична",
+    qrUnavailableText:
+      "Този стар запис не съдържа надеждните данни за покупката, нужни за потвърждение на достъп.",
     qrText:
       "Уникалният QR код се намира в PDF билета. Покажи го на входа от телефона си или на разпечатан носител.",
     keepSafe: "Пази билета си",
@@ -329,6 +384,9 @@ const TICKET_COPY = {
     testReminder: "Само тестова симулация",
     testReminderText:
       "За реални билети, актуална наличност и условия за достъп използвай посочения източник на събитието.",
+    legacyReminder: "Не разчитай на този запис за вход",
+    legacyReminderText:
+      "Организатор трябва да провери покупката, преди документът да бъде използван.",
     openSource: (source: string) => `Отвори ${source || "източника"}`,
     viewEvent: "Виж събитието",
   },
@@ -338,17 +396,26 @@ const TICKET_COPY = {
     usedTicket: "This ticket has been used",
     validTicket: "Valid e-ticket",
     testTicket: "Test ticket - not valid for entry",
+    legacyTicket: "Legacy ticket - unverified",
     ticketDetails: "Ticket details",
     testDetails: "Test payment details",
+    legacyDetails: "Available legacy ticket details",
     testNoticeTitle: "This is not an event admission ticket",
     testNoticeText:
       "The PDF records a Stripe test payment only. No real funds were charged, and the document is not valid for entry.",
+    legacyNoticeTitle: "Trusted purchase snapshot unavailable",
+    legacyNoticeText:
+      "This legacy record cannot confirm the offer type, amount paid, or admission rights. Do not rely on it as proof of admission.",
     holder: "Holder",
     categoryAndSeat: "Category and seat",
     testTypeAndReference: "Test offer and reference",
     dateAndTime: "Date and time",
     starts: "Starts",
     eventVenue: "Event venue",
+    pricePaid: "Price paid",
+    testAmount: "Test amount",
+    recordedAmount: "Recorded amount",
+    unavailable: "Reliable data unavailable",
     ticketNumber: "Ticket number",
     issuedOn: "Issued on",
     downloadPdf: "Download PDF ticket",
@@ -357,6 +424,9 @@ const TICKET_COPY = {
     qrVerification: "Test transaction verification",
     qrVerificationText:
       "The QR code in the PDF verifies only the test transaction. Do not present it at the entrance as a ticket.",
+    qrUnavailable: "Verification unavailable",
+    qrUnavailableText:
+      "This legacy record does not contain the trusted purchase data required to confirm admission.",
     qrText:
       "Your unique QR code is included in the PDF ticket. Present it on your phone or as a printed copy at the entrance.",
     keepSafe: "Keep your ticket safe",
@@ -365,25 +435,13 @@ const TICKET_COPY = {
     testReminder: "Test simulation only",
     testReminderText:
       "Use the attributed event source for real tickets, current availability, and entry terms.",
+    legacyReminder: "Do not rely on this record for entry",
+    legacyReminderText:
+      "An organizer must verify the purchase before the document can be used.",
     openSource: (source: string) => `Open ${source || "event source"}`,
     viewEvent: "View event",
   },
 } as const;
-
-function safeSourceUrl(value: string | undefined): string | null {
-  if (!value) {
-    return null;
-  }
-
-  try {
-    const url = new URL(value);
-    return url.protocol === "https:" && !url.username && !url.password
-      ? url.href
-      : null;
-  } catch {
-    return null;
-  }
-}
 
 function TicketDetail({
   icon,

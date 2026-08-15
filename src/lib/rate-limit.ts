@@ -56,7 +56,7 @@ export function requestIdentity(request: Request): string {
   return identity.slice(0, 128);
 }
 
-type RateLimitInput = {
+export type RateLimitInput = {
   key: string;
   limit: number;
   windowMs: number;
@@ -195,4 +195,35 @@ export async function consumeRateLimit(
       unavailable: true,
     };
   }
+}
+
+/**
+ * Consumes related buckets in the supplied order and stops as soon as one
+ * blocks the request. Put the lowest-cardinality bucket first (normally the
+ * client IP) so a denied client cannot keep creating account or identity rows
+ * by rotating user-controlled values.
+ */
+export async function consumeRateLimitsInOrder(
+  inputs: readonly RateLimitInput[],
+): Promise<RateLimitResult> {
+  if (inputs.length === 0) {
+    throw new Error("At least one rate-limit bucket is required.");
+  }
+
+  let retryAfterSeconds = 1;
+  for (const input of inputs) {
+    const result = await consumeRateLimit(input);
+    if (result.unavailable || !result.allowed) {
+      return result;
+    }
+    retryAfterSeconds = Math.max(
+      retryAfterSeconds,
+      result.retryAfterSeconds,
+    );
+  }
+
+  return {
+    allowed: true,
+    retryAfterSeconds,
+  };
 }

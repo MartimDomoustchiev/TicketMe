@@ -218,7 +218,14 @@ server-side sessions. Runner-ът записва checksum за всяка при
 Migration `004` добавя persistent discovery catalog, source provenance,
 review lifecycle, deterministic deduplication constraints и run audit history.
 Migration `005` добавя нормализирана buyer/event uniqueness гаранция за
-активните Checkout reservations.
+активните Checkout reservations. Migration `006` добавя shared PostgreSQL
+rate-limit buckets, а migration `007` пази immutable purchase snapshot за
+всяка reservation и издаден билет. Migration `008` записва версията и момента
+на приемане на условията при нова регистрация, без да измисля историческо
+съгласие за съществуващи профили. Migration `009` записва Stripe `livemode`
+към reservation-а и билета, така че историята да не наследява режима на
+по-късна deployment конфигурация. Runner-ът изпълнява всички налични migrations
+по ред; не избирай ръчно само част от списъка.
 
 ### AWS RDS PostgreSQL
 
@@ -303,7 +310,10 @@ GEMINI_API_KEY=""
    мрежи, credentials, custom ports, неразрешени redirects и прекалено големи
    отговори.
 2. Parser-ът приема само bounded event metadata. Контакти, attendees, цена,
-   capacity и HTML не се импортират.
+   capacity и HTML не се импортират. Всеки event трябва да има
+   собствен разрешен публичен URL; липсващ, невалиден или неразрешен
+   URL отхвърля записа, вместо private feed URL-ът да се съхрани или
+   покаже.
 3. Изтеклите или прекалено далечни събития отпадат. SHA-256 fingerprint,
    canonical source URL и provider event ID премахват дубликатите.
 4. Ако е конфигуриран допустим `GEMINI_API_KEY`, моделът
@@ -527,7 +537,7 @@ PostgreSQL през `DATABASE_URL`, когато той е конфигурир�
 | `DATABASE_AUTO_MIGRATE` | production: винаги `false` | Development-only runtime DDL escape hatch. |
 | `STRIPE_SECRET_KEY` | задължителна | Server-only `sk_test_` за тестово или `sk_live_` за изрично разрешено live Stripe Checkout. |
 | `STRIPE_PUBLISHABLE_KEY` | задължителна | Matching `pk_test_`/`pk_live_` ключ за Stripe.js; безопасен е за browser, но се подава server-side само при съвпадащ mode. |
-| `STRIPE_WEBHOOK_SECRET` | силно препоръчителна | Endpoint `whsec_` signing secret за durable fulfillment и expired-session cleanup. |
+| `STRIPE_WEBHOOK_SECRET` | задължителна | Endpoint `whsec_` signing secret за durable fulfillment и expired-session cleanup; production readiness я изисква. |
 | `RESEND_API_KEY` | задължителна | Resend API credential. |
 | `MAIL_FROM` | задължителна | Sender от верифициран домейн. |
 | `S3_BUCKET` | задължителна | Private bucket за PDF билетите. |
@@ -537,7 +547,7 @@ PostgreSQL през `DATABASE_URL`, когато той е конфигурир�
 | `S3_SECRET_ACCESS_KEY` | задължителна | Object storage secret key. |
 | `EVENT_DISCOVERY_FEED_URLS` | за discovery: задължителна | JSON array или newline-separated списък с разрешени HTTPS RSS/Atom/ICS/JSON feeds. |
 | `EVENT_DISCOVERY_ALLOWED_HOSTS` | не | Exact/wildcard host allowlist за source links извън feed hostname-а. |
-| `CRON_SECRET` | за scheduler: задължителна | Стандартният Vercel Cron Bearer secret за discovery и retry на ticket delivery; минимум 32 random символа. |
+| `CRON_SECRET` | задължителна | Стандартният Vercel Cron Bearer secret за discovery и retry на ticket delivery; минимум 32 random символа и част от production readiness. |
 | `EVENT_DISCOVERY_CRON_SECRET` | legacy fallback | Използва се само когато `CRON_SECRET` липсва. |
 | `EVENT_DISCOVERY_AUTO_PUBLISH` | не | Default `false`; `true` само след review на правата и качеството на всеки feed. |
 | `EVENT_DISCOVERY_MAX_EVENTS` | не | Максимални кандидати на run; default `40`, hard cap `500`. |
@@ -641,17 +651,22 @@ runbook е в [docs/SECURITY_GUIDE.md](docs/SECURITY_GUIDE.md).
 - CSP, HSTS, frame denial, MIME sniffing protection, referrer и permissions
   headers са конфигурирани глобално.
 - Discovery fetch-овете са exact-allowlisted, HTTPS-only, DNS/IP validated,
+  свързват се само към предварително валидирания IP (защита от DNS rebinding),
   manual-redirect, timeout и byte bounded; feed source links имат отделен host
-  allowlist.
+  allowlist. Discovery route-овете са Node.js runtime и fail-ват затворено,
+  когато runtime-ът не може да pin-не DNS адреса.
 - Model output минава през strict schema/runtime validation. Gemini никога не
   получава source URLs, contacts, users, prices или inventory и никога не
   управлява директно Stripe или ticket state.
 - Cron trigger-ът приема Vercel `GET` и external scheduler `POST` с минимум
   32-знаков Bearer secret, constant-time verification и PostgreSQL advisory
   lock; organizer review е same-origin и role protected.
-- Production health/readiness fail closed, ако липсват database, verified
-  custom-domain email, storage, public HTTPS URL или валиден Stripe secret key,
-  или ако PostgreSQL TLS не е активен. Webhook наличността се отчита отделно.
+- Production health/readiness fail closed, ако липсват database, configured
+  custom-domain email, storage, public HTTPS URL, matching Stripe secret и
+  publishable key modes, Stripe webhook secret или 32-знаков Cron secret, или
+  ако PostgreSQL schema/runtime privileges/TLS не са готови. Probe-ът проверява
+  конфигурацията, но не прави Stripe/S3/Resend мрежови операции и не доказва,
+  че външен account, webhook registration или provider delivery работят.
 
 В production rate limiter-ът използва атомарни shared PostgreSQL buckets с
 hashed identity keys и fail-closed поведение; local development пази bounded
@@ -722,14 +737,16 @@ cookies, webhook-и и payment callbacks. За пълен Cloudflare/OpenNext bu
    към `0.0.0.0/0`; използвай VPC-reachable runtime или одобрено static egress
    решение и security-group allowlist.
 3. Изпълни migrations `001_initial.sql`, `002_stripe_checkout.sql`,
-   `003_unified_auth.sql`, `004_event_discovery.sql` и
-   `005_checkout_fairness.sql` чрез
+   `003_unified_auth.sql`, `004_event_discovery.sql`,
+   `005_checkout_fairness.sql`, `006_distributed_rate_limits.sql`,
+   `007_reservation_snapshot.sql`, `008_terms_consent.sql` и
+   `009_stripe_payment_mode.sql` (както и всяка следваща migration) чрез
    `npm run db:migrate`.
 4. Верифицирай sending domain в Resend.
 5. Създай private R2 bucket и API token с object read/write права само за него.
-6. Добави задължителните database, email, storage, public URL и matching Stripe
-   `sk_test_`/`pk_test_` variables от `.env.example` във
-   Vercel. Никога не commit-вай secret стойностите.
+6. Добави задължителните database, email, storage, public URL, matching Stripe
+   `sk_test_`/`pk_test_`, `whsec_` и поне 32-знаков `CRON_SECRET` variables от
+   `.env.example` във Vercel. Никога не commit-вай secret стойностите.
 7. Добави Stripe webhook endpoint към `/api/stripe/webhook`, запиши `whsec_`
    secret-а и активирай желаните wallets в test Payment Methods настройките.
 8. Използвай `npm run build` за build command и `npm start` за start command,
@@ -739,8 +756,9 @@ cookies, webhook-и и payment callbacks. За пълен Cloudflare/OpenNext bu
    `DATABASE_URL`.
 10. Провери двата locale-а и целия acceptance flow с реален email адрес,
    Stripe test card и public staging domain. Не използвай live keys.
-11. Генерирай `CRON_SECRET`; Vercel Cron използва същия Bearer secret за daily
-    recovery на ticket delivery и за daily event discovery. Signed Stripe
+11. Потвърди, че Vercel Cron изпраща конфигурирания `CRON_SECRET`; същият Bearer
+    secret се използва за daily recovery на ticket delivery и за daily event
+    discovery. Signed Stripe
     webhook-ът остава immediate delivery path. Ако използваш discovery,
     конфигурирай само feeds с право за republication и остави auto-publish
     изключен до source review. Външен scheduler може да използва `POST` за

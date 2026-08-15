@@ -16,6 +16,7 @@ type CheckoutPurchaseSession = Pick<
 type CheckoutPurchaseReservation = {
   eventId: string;
   ticketType: string;
+  stripeLivemode?: boolean | null;
   purchaseSnapshot: CheckoutPurchaseSnapshot | null;
 };
 
@@ -44,6 +45,13 @@ export function assertStripeCheckoutPurchaseSnapshot(
   }
 
   assertStripeCheckoutOfferSafety(session, snapshot);
+
+  if (
+    typeof reservation.stripeLivemode === "boolean" &&
+    reservation.stripeLivemode !== session.livemode
+  ) {
+    throw new Error("CHECKOUT_PAYMENT_MODE_MISMATCH");
+  }
 
   if (
     session.metadata?.eventId !== reservation.eventId ||

@@ -81,6 +81,8 @@ const COPY = {
       "Stripe показва Apple Pay или Google Pay само когато са налични за твоето устройство.",
     testPayment:
       "Stripe test mode: няма реално таксуване. PDF билетът се изпраща по имейл, но не е валиден за вход на събитието.",
+    admissionTestPayment:
+      "Stripe test mode: няма реално таксуване. Завършването издава показания по-горе билет за вход за целите на този проект.",
     testInventory:
       "Цените и наличностите по-долу са симулационни данни на Tiketko, а не официални цени или места от организатора.",
     reservationWindow:
@@ -94,6 +96,8 @@ const COPY = {
     successText: "Твоят PDF билет с QR код е готов.",
     testSuccessText:
       "Тестовият PDF билет е готов и не е валиден за вход на събитието.",
+    admissionTestSuccessText:
+      "Не са таксувани реални средства. PDF билетът за вход с QR код е готов.",
     paymentReference: "Stripe референция",
     openTicket: "Виж билета",
     downloadPdf: "Изтегли PDF",
@@ -141,6 +145,8 @@ const COPY = {
       "Stripe shows Apple Pay or Google Pay only when available for your device.",
     testPayment:
       "Stripe test mode: no real money is charged. The PDF ticket is emailed to you, but it is not valid for admission to the event.",
+    admissionTestPayment:
+      "Stripe test mode: no real money is charged. Completing it issues the admission ticket shown above for this project.",
     testInventory:
       "The prices and availability below are Tiketko simulation data, not the organizer's official prices or inventory.",
     reservationWindow:
@@ -154,6 +160,8 @@ const COPY = {
     successText: "Your PDF ticket with its QR code is ready.",
     testSuccessText:
       "Your test PDF ticket is ready and is not valid for venue admission.",
+    admissionTestSuccessText:
+      "No real funds were charged. Your admission PDF ticket with its QR code is ready.",
     paymentReference: "Stripe reference",
     openTicket: "View ticket",
     downloadPdf: "Download PDF",
@@ -265,6 +273,7 @@ export function TicketDesk({
   const session = initialSession;
   const copy = COPY[locale];
   const testSimulation = isTestSimulationEvent(event);
+  const testPaymentMode = paymentMode === "test";
 
   const selectedTicket = useMemo(
     () =>
@@ -551,10 +560,16 @@ export function TicketDesk({
                 <CheckCircle2 size={23} aria-hidden="true" />
               </span>
               <h4 className="mt-3 text-lg font-black text-emerald-950">
-                {testSimulation ? copy.testSuccessTitle : copy.successTitle}
+                {testSimulation || testPaymentMode
+                  ? copy.testSuccessTitle
+                  : copy.successTitle}
               </h4>
               <p className="mt-1 text-sm leading-6 text-emerald-800">
-                {testSimulation ? copy.testSuccessText : copy.successText}
+                {testSimulation
+                  ? copy.testSuccessText
+                  : testPaymentMode
+                    ? copy.admissionTestSuccessText
+                    : copy.successText}
               </p>
               <dl className="mt-3 rounded-xl bg-white/75 p-3 text-xs text-emerald-950">
                 <div className="flex items-center justify-between gap-3">
@@ -652,7 +667,9 @@ export function TicketDesk({
                   </div>
                   {(stripeSession.mode === "test" || testSimulation) && (
                     <p className="mb-3 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs font-bold leading-5 text-amber-900">
-                      {copy.testPayment}
+                      {testSimulation
+                        ? copy.testPayment
+                        : copy.admissionTestPayment}
                     </p>
                   )}
                   <StripeEmbeddedCheckout
@@ -689,7 +706,9 @@ export function TicketDesk({
                   </div>
                   {(paymentMode === "test" || testSimulation) && (
                     <p className="mt-3 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs font-bold leading-5 text-amber-900">
-                      {copy.testPayment}
+                      {testSimulation
+                        ? copy.testPayment
+                        : copy.admissionTestPayment}
                     </p>
                   )}
                   <p className="mt-3 flex items-start gap-2 text-xs font-bold leading-5 text-slate-600">

@@ -17,7 +17,9 @@ import {
   parseDiscoveryEventCandidate,
   parseDiscoveryFeed,
   parseDiscoveryFeedUrls,
+  parseFetchedDiscoveryCandidates,
   parseSafeDiscoveryUrl,
+  prepareDiscoveredCatalogCandidate,
   type DiscoveryEventCandidate,
   type GeminiDiscoveryRequest,
 } from "../src/lib/event-discovery";
@@ -222,6 +224,59 @@ test("feed fetches are exact-allowlist, redirect, time, and size bounded", async
   );
 });
 
+test("redirected feeds resolve relative event URLs against the final URL", () => {
+  const candidates = parseFetchedDiscoveryCandidates(
+    {
+      body: JSON.stringify({
+        events: [
+          {
+            id: "redirected-event",
+            name: "Redirected Event",
+            startDate: "2027-06-12T17:00:00Z",
+            city: "Sofia",
+            venue: "Arena Sofia",
+            url: "../events/redirected-event",
+          },
+          {
+            id: "configured-host-event",
+            name: "Configured Host Event",
+            startDate: "2027-06-13T17:00:00Z",
+            city: "Sofia",
+            venue: "Arena Sofia",
+            url: "https://feeds.example.com/events/configured-host-event",
+          },
+          {
+            id: "untrusted-host-event",
+            name: "Untrusted Host Event",
+            startDate: "2027-06-14T17:00:00Z",
+            city: "Sofia",
+            venue: "Arena Sofia",
+            url: "https://evil.example/events/untrusted",
+          },
+        ],
+      }),
+      contentType: "application/json",
+      feedUrl: "https://feeds.example.com/private/start.json?token=secret",
+      finalUrl: "https://cdn.example.net/live/feed.json",
+    },
+    [],
+  );
+
+  assert.equal(candidates.length, 2);
+  assert.equal(
+    candidates[0].sourceUrl,
+    "https://cdn.example.net/events/redirected-event",
+  );
+  assert.equal(
+    candidates[0].feedUrl,
+    "https://feeds.example.com/private/start.json?token=secret",
+  );
+  assert.equal(
+    candidates[1].sourceUrl,
+    "https://feeds.example.com/events/configured-host-event",
+  );
+});
+
 test("RSS and Atom parsers keep only strict event facts", () => {
   const rss = `<?xml version="1.0"?>
     <rss version="2.0"><channel>
@@ -273,6 +328,7 @@ test("feed text decoding is single-pass and markup parsing is quote-aware", () =
         startDate: "2027-08-01T10:00:00Z",
         venue: "Hall One",
         city: "Sofia",
+        url: "https://feeds.example.com/events/markup-regression",
         description:
           "Before &amp; safe &constructor; &lt;b&gt;bold&lt;/b&gt; " +
           "&amp;lt;em&amp;gt;literal&amp;lt;/em&amp;gt; " +
@@ -287,6 +343,7 @@ test("feed text decoding is single-pass and markup parsing is quote-aware", () =
         startDate: "2027-08-02T10:00:00Z",
         venue: "Hall Two",
         city: "Sofia",
+        url: "https://feeds.example.com/events/unclosed-script",
         description: "Visible<script data-boundary='>'>hidden forever",
       },
       {
@@ -295,6 +352,7 @@ test("feed text decoding is single-pass and markup parsing is quote-aware", () =
         startDate: "2027-08-03T10:00:00Z",
         venue: "Hall Three",
         city: "Sofia",
+        url: "https://feeds.example.com/events/bounded-markup",
         description:
           "Visible " +
           "&unterminated".repeat(2_000) +
@@ -348,11 +406,60 @@ test("JSON source links require the feed host or an explicit host rule", () => {
     ),
   });
 
+  assert.equal(events.length, 1);
   assert.equal(events[0].sourceUrl, "https://tickets.example.com/safe");
-  assert.equal(
-    events[1].sourceUrl,
-    "https://feeds.example.com/events.json",
-  );
+});
+
+test("discovery rejects entries without an explicit allowlisted event URL", () => {
+  const privateFeedUrl =
+    "https://feeds.example.com/private-calendar/token.ics?key=secret";
+  const body = JSON.stringify({
+    events: [
+      {
+        name: "Missing public source",
+        startDate: "2027-07-03T18:00:00Z",
+        venue: "Park Stage",
+        city: "Sofia",
+      },
+      {
+        name: "Disallowed public source",
+        startDate: "2027-07-04T18:00:00Z",
+        venue: "Park Stage",
+        city: "Sofia",
+        url: "https://evil.example/phishing",
+      },
+    ],
+  });
+
+  const events = parseDiscoveryFeed(body, {
+    feedUrl: privateFeedUrl,
+    contentType: "application/json",
+  });
+
+  assert.deepEqual(events, []);
+  assert.doesNotMatch(JSON.stringify(events), /token|key=secret/);
+});
+
+test("prepared catalog facts never persist feed path or query secrets", () => {
+  const event = candidate({
+    feedUrl:
+      "https://feeds.example.com/private-token/calendar.json?key=secret",
+  });
+  const prepared = prepareDiscoveredCatalogCandidate({
+    ...event,
+    enrichedBy: "deterministic",
+    enrichment: {
+      appealScore: 80,
+      category: "Concerts",
+      titleBg: event.title,
+      titleEn: event.title,
+    },
+  });
+
+  assert.ok(prepared);
+  const storedFacts = JSON.stringify(prepared.source.extractedFacts);
+  assert.match(storedFacts, /\.tiketko-feed/);
+  assert.doesNotMatch(storedFacts, /private-token|calendar\.json|key=secret/);
 });
 
 test("ICS parsing excludes cancelled events and contact fields", () => {

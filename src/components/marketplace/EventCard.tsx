@@ -15,6 +15,7 @@ import {
   formatEventMonth,
   formatPrice,
   formatVenueLocation,
+  localizedEventTitle,
 } from "@/components/marketplace/catalog-ui";
 import { getDictionary } from "@/lib/dictionaries";
 import { getEventVisual } from "@/lib/event-visual";
@@ -43,6 +44,7 @@ export function EventCard({
     locale === "en" ? "Tiketko test offer" : "Tiketko тестова оферта";
   const sourceLinkLabel =
     locale === "en" ? "Event source" : "Източник на събитието";
+  const title = localizedEventTitle(event, locale);
 
   return (
     <article className="group flex h-full flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-[0_8px_30px_rgba(15,23,42,0.06)] transition duration-300 hover:-translate-y-1 hover:border-blue-200 hover:shadow-[0_18px_45px_rgba(15,23,42,0.13)]">
@@ -94,7 +96,7 @@ export function EventCard({
 
           <div className="flex min-w-0 flex-1 flex-col">
             <h3 className="line-clamp-2 text-[17px] font-black leading-6 tracking-[-0.02em] text-[#10172a] transition group-hover:text-[#2457ff]">
-              {event.title}
+              {title}
             </h3>
             <p className="mt-2 flex min-w-0 items-center gap-1.5 text-sm text-slate-500">
               <MapPin size={14} className="shrink-0" aria-hidden="true" />

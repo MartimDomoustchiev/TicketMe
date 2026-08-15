@@ -3,18 +3,13 @@ import "server-only";
 import { unstable_cache } from "next/cache";
 import {
   CATALOG_EVENTS,
-  formatEventDate,
-  formatEventTime,
-  formatPrice,
-  getCategoryImage,
   getEventById,
   getEventBySlug,
   isEventOpenForInternalSale,
   isEventUpcoming,
   type CatalogEvent,
-  type CurrencyCode,
-  type EventCategory,
 } from "@/lib/event";
+import { mapDiscoveredCatalogEvent } from "@/lib/catalog-mapper";
 import {
   getPublishedCatalogEventById,
   getPublishedCatalogEventBySlug,
@@ -51,7 +46,7 @@ export async function listCatalogEvents(): Promise<readonly CatalogEvent[]> {
     return mergeCatalogues(
       staticEvents,
       discovered
-        .map(mapDiscoveredEvent)
+        .map(mapDiscoveredCatalogEvent)
         .filter((event) => isEventUpcoming(event)),
     );
   } catch (error) {
@@ -130,7 +125,7 @@ export async function findCatalogEventById(
     const discovered = await getCachedPublishedCatalogEventById(id);
     if (discovered) {
       const mapped = preserveStaticCheckout(
-        mapDiscoveredEvent(discovered),
+        mapDiscoveredCatalogEvent(discovered),
         staticEvent,
       );
       return isEventUpcoming(mapped) ? mapped : fallback;
@@ -156,7 +151,7 @@ export async function findCatalogEventBySlug(
     const discovered = await getCachedPublishedCatalogEventBySlug(slug);
     if (discovered) {
       const mapped = preserveStaticCheckout(
-        mapDiscoveredEvent(discovered),
+        mapDiscoveredCatalogEvent(discovered),
         staticEvent,
       );
       return isEventUpcoming(mapped) ? mapped : fallback;
@@ -184,63 +179,6 @@ export function isInternallySoldEvent(event: CatalogEvent): boolean {
 
 function upcomingStaticEvents(now = new Date()): readonly CatalogEvent[] {
   return CATALOG_EVENTS.filter((event) => isEventUpcoming(event, now));
-}
-
-function mapDiscoveredEvent(record: CatalogEventRecord): CatalogEvent {
-  if (!record.primarySource) {
-    throw new Error("Published discovered event is missing its source.");
-  }
-
-  const category = record.category as EventCategory;
-  const hasSupportedPrice =
-    record.currency === "EUR" && record.priceFromMinor !== null;
-  const priceFrom = hasSupportedPrice
-    ? (record.priceFromMinor ?? 0) / 100
-    : 0;
-  const currency = "EUR" as CurrencyCode;
-  // Discovery artwork is source metadata, not automatically licensed for
-  // republication. Render Tiketko-owned category art until an organizer
-  // supplies an approved, durably stored asset with explicit usage rights.
-  const image = getCategoryImage(category);
-  const sourceName =
-    record.primarySource.provider
-      .split("-")
-      .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-      .join(" ") || "Event source";
-
-  return {
-    id: record.id,
-    slug: record.slug,
-    title: record.title,
-    name: record.title,
-    tagline: record.tagline,
-    description: record.description,
-    category,
-    city: record.city,
-    venue: record.venue,
-    address: record.address,
-    startsAt: record.startsAt,
-    date: formatEventDate(record.startsAt),
-    time: formatEventTime(record.startsAt),
-    priceFrom,
-    priceLabel:
-      !hasSupportedPrice
-        ? "Източник"
-        : `от ${formatPrice(priceFrom, currency)}`,
-    priceAvailable: hasSupportedPrice,
-    currency,
-    image,
-    heroImage: image,
-    ticketTypes: [],
-    sourceName,
-    sourceUrl: record.primarySource.sourceUrl,
-    sourceSellsTickets: false,
-    saleMode: record.saleMode,
-    sourceOfficial: record.primarySource.isOfficial,
-    aiEnhanced: record.lastDiscoveredRunId !== null,
-    featured: record.featured,
-    bangerScore: record.bangerScore,
-  };
 }
 
 function mergeCatalogues(

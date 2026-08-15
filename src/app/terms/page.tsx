@@ -3,6 +3,7 @@ import Link from "next/link";
 import { MarketplaceFooter } from "@/components/marketplace/MarketplaceFooter";
 import { MarketplaceHeader } from "@/components/marketplace/MarketplaceHeader";
 import { getLocale, localizeHref } from "@/lib/i18n";
+import { legalLastUpdatedDate } from "@/lib/legal";
 
 export async function generateMetadata(): Promise<Metadata> {
   const locale = await getLocale();
@@ -34,7 +35,7 @@ export default async function TermsPage() {
             {copy.title}
           </h1>
           <p className="mt-3 text-sm text-slate-500">
-            {copy.updated}
+            {copy.updatedPrefix} {legalLastUpdatedDate(locale)}
           </p>
 
           <div className="mt-8 space-y-8 text-[15px] leading-7 text-slate-700">
@@ -48,6 +49,10 @@ export default async function TermsPage() {
 
             <LegalSection title={copy.ticketsTitle}>
               {copy.tickets}
+            </LegalSection>
+
+            <LegalSection title={copy.paymentsTitle}>
+              {copy.payments}
             </LegalSection>
 
             <LegalSection title={copy.eventDataTitle}>
@@ -80,7 +85,7 @@ const TERMS_COPY = {
   bg: {
     eyebrow: "Правна информация",
     title: "Условия за ползване",
-    updated: "Последна актуализация: 27 юли 2026 г.",
+    updatedPrefix: "Последна актуализация:",
     scopeTitle: "1. Обхват",
     scope:
       "Tiketko предоставя каталог със събития, информация за наличност и възможност за издаване на електронни билети. С използването на услугата приемате настоящите условия.",
@@ -89,14 +94,17 @@ const TERMS_COPY = {
       "За издаване на билет е необходим валиден и потвърден имейл. Потребителят носи отговорност за коректността на въведените име и имейл и за сигурността на достъпа до своята поща.",
     ticketsTitle: "3. Билети и наличност",
     tickets:
-      "Наличността се актуализира в реално време. Поръчката се счита за успешна едва след издаване на уникален билет. Всеки PDF билет и QR код са предназначени за еднократен достъп и не трябва да се споделят публично.",
-    eventDataTitle: "4. Данни за събитията",
+      "Наличността се актуализира в реално време. Поръчката се счита за успешна едва след издаване на уникален запис. Само PDF и QR код, изрично означени като билет за вход, могат да се използват еднократно на събитието. Записите, означени като тестова симулация, не важат за вход. Не споделяйте билетни файлове или QR кодове публично.",
+    paymentsTitle: "4. Плащания и външни източници",
+    payments:
+      "Stripe test mode не таксува реални средства. Правото на вход се определя отделно от вида на показаната оферта: билетът за вход може да бъде проверен на събитието, а тестовата симулация не може. Когато Tiketko препраща към външен източник или продавач, наличността, плащането, анулирането и възстановяването на средства се уреждат от условията на съответния продавач. Режимът, видът на офертата и източникът се показват преди продължаване.",
+    eventDataTitle: "5. Данни за събитията",
     eventData:
       "Датата, началният час, мястото и правилата за достъп са посочени на страницата на съответното събитие. При промяна важи актуалната информация, публикувана от организатора.",
-    useTitle: "5. Допустима употреба",
+    useTitle: "6. Допустима употреба",
     use:
       "Не се допуска автоматизирано изкупуване, заобикаляне на опашката, злоупотреба с QR кодове или опит за достъп до чужди билети и административни функции.",
-    dataTitle: "6. Лични данни",
+    dataTitle: "7. Лични данни",
     dataPrefix:
       "Обработването на лични данни и използването на сесийни бисквитки са описани в",
     privacyPolicy: "политиката за поверителност",
@@ -104,7 +112,7 @@ const TERMS_COPY = {
   en: {
     eyebrow: "Legal information",
     title: "Terms of use",
-    updated: "Last updated: 27 July 2026",
+    updatedPrefix: "Last updated:",
     scopeTitle: "1. Scope",
     scope:
       "Tiketko provides an event catalogue, availability information and electronic ticket issuance. By using the service, you agree to these terms.",
@@ -113,14 +121,17 @@ const TERMS_COPY = {
       "A valid, verified email address is required before a ticket can be issued. You are responsible for the accuracy of your name and email and for keeping access to your inbox secure.",
     ticketsTitle: "3. Tickets and availability",
     tickets:
-      "Availability updates in real time. An order is only successful once a unique ticket has been issued. Each PDF ticket and QR code is intended for one-time admission and must not be shared publicly.",
-    eventDataTitle: "4. Event information",
+      "Availability updates in real time. An order is only successful once a unique record has been issued. Only a PDF and QR code explicitly identified as an admission ticket may be used once at the event. Records identified as test simulations are not valid for admission. Do not share ticket files or QR codes publicly.",
+    paymentsTitle: "4. Payments and external sources",
+    payments:
+      "Stripe test mode does not charge real funds. Admission rights are determined separately by the displayed offer type: an admission ticket can be checked at the event, while a test simulation cannot. When Tiketko links to an external source or seller, availability, payment, cancellation and refunds are governed by that seller's terms. The applicable mode, offer type and source are shown before you continue.",
+    eventDataTitle: "5. Event information",
     eventData:
       "The date, start time, venue and admission rules appear on the relevant event page. If details change, the latest information published by the organizer applies.",
-    useTitle: "5. Acceptable use",
+    useTitle: "6. Acceptable use",
     use:
       "Automated purchasing, bypassing the queue, QR code abuse and attempts to access another customer's tickets or administrative functions are prohibited.",
-    dataTitle: "6. Personal data",
+    dataTitle: "7. Personal data",
     dataPrefix:
       "Personal data processing and the use of session cookies are described in the",
     privacyPolicy: "privacy policy",

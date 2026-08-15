@@ -33,8 +33,12 @@ export type CatalogEvent = {
   slug: string;
   title: string;
   name: string;
+  /** Faithful English source/enrichment text when one was actually stored. */
+  titleEn?: string;
   tagline: string;
   description: string;
+  /** Faithful English source/enrichment text when one was actually stored. */
+  descriptionEn?: string;
   category: EventCategory;
   city: string;
   venue: string;

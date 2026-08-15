@@ -69,15 +69,29 @@ function normalizeState(value: unknown): AuthState {
   }
 
   const candidate = value as Partial<AuthState>;
-  const users =
+  const storedUsers =
     candidate.users && typeof candidate.users === "object"
       ? candidate.users
       : {};
+  const users: Record<string, StoredUser> = {};
   const userIdsByEmail: Record<string, string> = {};
 
-  for (const user of Object.values(users)) {
+  for (const [userId, user] of Object.entries(storedUsers)) {
     if (user?.id && user.email) {
-      userIdsByEmail[normalizeEmail(user.email)] = user.id;
+      const normalizedUser = {
+        ...user,
+        termsAcceptedVersion:
+          typeof user.termsAcceptedVersion === "string"
+            ? user.termsAcceptedVersion
+            : null,
+        termsAcceptedAt:
+          typeof user.termsAcceptedAt === "string"
+            ? user.termsAcceptedAt
+            : null,
+      };
+      users[userId] = normalizedUser;
+      userIdsByEmail[normalizeEmail(normalizedUser.email)] =
+        normalizedUser.id;
     }
   }
 
@@ -209,6 +223,7 @@ export function createUser(input: {
   email: string;
   name: string;
   passwordHash: string;
+  termsVersion: string;
 }): Promise<CreateUserResult> {
   return withMutation((state) => {
     removeExpiredRecords(state);
@@ -225,6 +240,8 @@ export function createUser(input: {
       passwordHash: input.passwordHash,
       role: "buyer",
       emailVerifiedAt: null,
+      termsAcceptedVersion: input.termsVersion,
+      termsAcceptedAt: now,
       createdAt: now,
       updatedAt: now,
     };

@@ -1,7 +1,10 @@
 import { issueEmailVerification } from "@/lib/auth-store";
 import { isValidEmail, normalizeEmail } from "@/lib/auth-validation";
 import { sendVerificationEmail } from "@/lib/email";
-import { consumeRateLimit, requestIdentity } from "@/lib/rate-limit";
+import {
+  consumeRateLimitsInOrder,
+  requestIdentity,
+} from "@/lib/rate-limit";
 import { readJsonBodyWithinLimit } from "@/lib/request-body";
 import { isSameOriginRequest } from "@/lib/request-security";
 import { getBaseUrl, safeReturnPath } from "@/lib/site";
@@ -9,6 +12,9 @@ import { getBaseUrl, safeReturnPath } from "@/lib/site";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 const MAX_VERIFICATION_BODY_BYTES = 16 * 1024;
+const VERIFICATION_ACCOUNT_LIMIT = 5;
+const VERIFICATION_IP_LIMIT = 15;
+const VERIFICATION_WINDOW_MS = 15 * 60_000;
 
 type VerificationBody = {
   email?: unknown;
@@ -46,11 +52,19 @@ export async function POST(request: Request) {
     return Response.json({ error: "email" }, { status: 400 });
   }
 
-  const rateLimit = await consumeRateLimit({
-    key: `verification:${requestIdentity(request)}:${email}`,
-    limit: 5,
-    windowMs: 15 * 60_000,
-  });
+  const identity = requestIdentity(request);
+  const rateLimit = await consumeRateLimitsInOrder([
+    {
+      key: `verification:ip:${identity}`,
+      limit: VERIFICATION_IP_LIMIT,
+      windowMs: VERIFICATION_WINDOW_MS,
+    },
+    {
+      key: `verification:account:${email}`,
+      limit: VERIFICATION_ACCOUNT_LIMIT,
+      windowMs: VERIFICATION_WINDOW_MS,
+    },
+  ]);
   if (rateLimit.unavailable) {
     return Response.json(
       { error: "service-unavailable" },

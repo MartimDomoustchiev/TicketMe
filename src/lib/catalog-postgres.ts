@@ -73,6 +73,7 @@ export type EventDiscoveryRunCounts = {
   eventsUpdated?: number;
   eventsUnchanged?: number;
   candidatesRejected?: number;
+  metadata?: Record<string, JsonValue>;
 };
 
 export type UpsertDiscoveredEventOptions = {
@@ -177,6 +178,9 @@ function mapCatalogEvent(
           ),
           sourceUrl: String(row.primary_source_url),
           isOfficial: Boolean(row.primary_source_is_official),
+          extractedFacts: jsonObject(
+            row.primary_source_extracted_facts,
+          ),
         }
       : null,
   };
@@ -299,10 +303,16 @@ async function selectCatalogEventById(
       source.provider AS primary_source_provider,
       source.provider_event_id AS primary_source_provider_event_id,
       source.source_url AS primary_source_url,
-      source.is_official AS primary_source_is_official
+      source.is_official AS primary_source_is_official,
+      source.extracted_facts AS primary_source_extracted_facts
     FROM catalog_events AS event
     LEFT JOIN LATERAL (
-      SELECT provider, provider_event_id, source_url, is_official
+      SELECT
+        provider,
+        provider_event_id,
+        source_url,
+        is_official,
+        extracted_facts
       FROM catalog_event_sources
       WHERE event_id = event.id
       ORDER BY
@@ -365,10 +375,16 @@ export async function listPublishedCatalogEvents(
           source.provider AS primary_source_provider,
           source.provider_event_id AS primary_source_provider_event_id,
           source.source_url AS primary_source_url,
-          source.is_official AS primary_source_is_official
+          source.is_official AS primary_source_is_official,
+          source.extracted_facts AS primary_source_extracted_facts
         FROM catalog_events AS event
         LEFT JOIN LATERAL (
-          SELECT provider, provider_event_id, source_url, is_official
+          SELECT
+            provider,
+            provider_event_id,
+            source_url,
+            is_official,
+            extracted_facts
           FROM catalog_event_sources
           WHERE event_id = event.id
           ORDER BY
@@ -413,10 +429,16 @@ export async function listPublishedCatalogEvents(
           source.provider AS primary_source_provider,
           source.provider_event_id AS primary_source_provider_event_id,
           source.source_url AS primary_source_url,
-          source.is_official AS primary_source_is_official
+          source.is_official AS primary_source_is_official,
+          source.extracted_facts AS primary_source_extracted_facts
         FROM catalog_events AS event
         LEFT JOIN LATERAL (
-          SELECT provider, provider_event_id, source_url, is_official
+          SELECT
+            provider,
+            provider_event_id,
+            source_url,
+            is_official,
+            extracted_facts
           FROM catalog_event_sources
           WHERE event_id = event.id
           ORDER BY
@@ -460,10 +482,16 @@ export async function listPublishedCatalogEvents(
           source.provider AS primary_source_provider,
           source.provider_event_id AS primary_source_provider_event_id,
           source.source_url AS primary_source_url,
-          source.is_official AS primary_source_is_official
+          source.is_official AS primary_source_is_official,
+          source.extracted_facts AS primary_source_extracted_facts
         FROM catalog_events AS event
         LEFT JOIN LATERAL (
-          SELECT provider, provider_event_id, source_url, is_official
+          SELECT
+            provider,
+            provider_event_id,
+            source_url,
+            is_official,
+            extracted_facts
           FROM catalog_event_sources
           WHERE event_id = event.id
           ORDER BY
@@ -506,10 +534,16 @@ export async function listPublishedCatalogEvents(
         source.provider AS primary_source_provider,
         source.provider_event_id AS primary_source_provider_event_id,
         source.source_url AS primary_source_url,
-        source.is_official AS primary_source_is_official
+        source.is_official AS primary_source_is_official,
+        source.extracted_facts AS primary_source_extracted_facts
       FROM catalog_events AS event
       LEFT JOIN LATERAL (
-        SELECT provider, provider_event_id, source_url, is_official
+        SELECT
+          provider,
+          provider_event_id,
+          source_url,
+          is_official,
+          extracted_facts
         FROM catalog_event_sources
         WHERE event_id = event.id
         ORDER BY
@@ -568,10 +602,16 @@ export async function getPublishedCatalogEventById(
       source.provider AS primary_source_provider,
       source.provider_event_id AS primary_source_provider_event_id,
       source.source_url AS primary_source_url,
-      source.is_official AS primary_source_is_official
+      source.is_official AS primary_source_is_official,
+      source.extracted_facts AS primary_source_extracted_facts
     FROM catalog_events AS event
     LEFT JOIN LATERAL (
-      SELECT provider, provider_event_id, source_url, is_official
+      SELECT
+        provider,
+        provider_event_id,
+        source_url,
+        is_official,
+        extracted_facts
       FROM catalog_event_sources
       WHERE event_id = event.id
       ORDER BY
@@ -604,10 +644,16 @@ export async function getPublishedCatalogEventBySlug(
       source.provider AS primary_source_provider,
       source.provider_event_id AS primary_source_provider_event_id,
       source.source_url AS primary_source_url,
-      source.is_official AS primary_source_is_official
+      source.is_official AS primary_source_is_official,
+      source.extracted_facts AS primary_source_extracted_facts
     FROM catalog_events AS event
     LEFT JOIN LATERAL (
-      SELECT provider, provider_event_id, source_url, is_official
+      SELECT
+        provider,
+        provider_event_id,
+        source_url,
+        is_official,
+        extracted_facts
       FROM catalog_event_sources
       WHERE event_id = event.id
       ORDER BY
@@ -645,10 +691,16 @@ export async function listPendingCatalogEvents(
         source.provider AS primary_source_provider,
         source.provider_event_id AS primary_source_provider_event_id,
         source.source_url AS primary_source_url,
-        source.is_official AS primary_source_is_official
+        source.is_official AS primary_source_is_official,
+        source.extracted_facts AS primary_source_extracted_facts
       FROM catalog_events AS event
       LEFT JOIN LATERAL (
-        SELECT provider, provider_event_id, source_url, is_official
+        SELECT
+          provider,
+          provider_event_id,
+          source_url,
+          is_official,
+          extracted_facts
         FROM catalog_event_sources
         WHERE event_id = event.id
         ORDER BY
@@ -1196,6 +1248,7 @@ export async function completeEventDiscoveryRun(
   client: CatalogQueryable = databaseSql(),
 ): Promise<EventDiscoveryRunRecord | null> {
   const id = cleanRequiredText(runId, "run_id", 200);
+  const metadata = normalizeRunMetadata(counts.metadata);
   const rows = await client`
     UPDATE event_discovery_runs
     SET status = 'completed',
@@ -1206,6 +1259,7 @@ export async function completeEventDiscoveryRun(
         candidates_rejected = ${normalizeRunCount(
           counts.candidatesRejected,
         )},
+        metadata = event_discovery_runs.metadata || ${client.json(metadata)},
         error_message = NULL,
         completed_at = NOW()
     WHERE id = ${id}
@@ -1224,6 +1278,7 @@ export async function failEventDiscoveryRun(
   client: CatalogQueryable = databaseSql(),
 ): Promise<EventDiscoveryRunRecord | null> {
   const id = cleanRequiredText(runId, "run_id", 200);
+  const metadata = normalizeRunMetadata(counts.metadata);
   const errorMessage = cleanOptionalText(
     error instanceof Error ? error.message : String(error),
     4_000,
@@ -1238,6 +1293,7 @@ export async function failEventDiscoveryRun(
         candidates_rejected = ${normalizeRunCount(
           counts.candidatesRejected,
         )},
+        metadata = event_discovery_runs.metadata || ${client.json(metadata)},
         error_message = ${errorMessage ?? "Discovery failed."},
         completed_at = NOW()
     WHERE id = ${id}

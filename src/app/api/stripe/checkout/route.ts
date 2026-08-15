@@ -197,6 +197,7 @@ export async function POST(request: Request) {
     await attachCheckoutSession({
       reservationId: reservation.id,
       stripeCheckoutSessionId: checkoutSession.id,
+      stripeLivemode: checkoutSession.livemode,
     });
 
     return Response.json({

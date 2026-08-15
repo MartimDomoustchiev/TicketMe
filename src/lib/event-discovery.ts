@@ -17,12 +17,20 @@ import {
   type DiscoveryAllowedHost,
   type DiscoveryDnsLookup,
   type DiscoveryFetch,
+  type FetchedDiscoveryFeed,
 } from "@/lib/event-discovery-security";
 import {
   dedupeDiscoveryCandidates,
   type DiscoveryEventCandidate,
   type EnrichedDiscoveryEvent,
 } from "@/lib/event-discovery-types";
+import {
+  completedDiscoveryFeedOutcomes,
+  discoveryFeedOutcomeMetadata,
+  pendingDiscoveryFeedOutcomes,
+  redactDiscoveryFeedReference,
+  type DiscoveryFeedOutcome,
+} from "@/lib/discovery-run-metadata";
 
 export * from "@/lib/event-discovery-gemini";
 export * from "@/lib/event-discovery-parsers";
@@ -94,6 +102,36 @@ export type RunEventDiscoveryResult =
       status: "completed";
     };
 
+export function parseFetchedDiscoveryCandidates(
+  fetched: FetchedDiscoveryFeed,
+  allowedSourceHosts: readonly DiscoveryAllowedHost[],
+): readonly DiscoveryEventCandidate[] {
+  const configuredHostname = new URL(fetched.feedUrl).hostname.toLowerCase();
+  const finalHostname = new URL(fetched.finalUrl).hostname.toLowerCase();
+  const effectiveAllowedSourceHosts =
+    configuredHostname === finalHostname ||
+    allowedSourceHosts.some(
+      (rule) =>
+        !rule.includeSubdomains && rule.hostname === configuredHostname,
+    )
+      ? allowedSourceHosts
+      : [
+          ...allowedSourceHosts,
+          { hostname: configuredHostname, includeSubdomains: false },
+        ];
+
+  return parseDiscoveryFeed(fetched.body, {
+    allowedSourceHosts: effectiveAllowedSourceHosts,
+    contentType: fetched.contentType,
+    feedUrl: fetched.finalUrl,
+  }).map((candidate) => ({
+    ...candidate,
+    // Keep provenance tied to the configured feed while resolving relative
+    // event links and same-host rules against the validated redirect target.
+    feedUrl: fetched.feedUrl,
+  }));
+}
+
 function positiveIntegerSetting(
   value: string | undefined,
   fallback: number,
@@ -128,12 +166,6 @@ function failureCode(error: unknown): string {
   }
 
   return "FEED_PROCESSING_FAILED";
-}
-
-function redactedFeedReference(feedUrl: URL): string {
-  const safe = new URL(feedUrl.href);
-  safe.search = safe.search ? "?[redacted]" : "";
-  return safe.href;
 }
 
 export async function discoverEventCandidates(
@@ -175,11 +207,10 @@ export async function discoverEventCandidates(
           timeoutMs: options.timeoutMs,
         });
         return {
-          candidates: parseDiscoveryFeed(fetched.body, {
+          candidates: parseFetchedDiscoveryCandidates(
+            fetched,
             allowedSourceHosts,
-            contentType: fetched.contentType,
-            feedUrl: fetched.feedUrl,
-          }),
+          ),
           feedUrl,
           ok: true as const,
         };
@@ -216,7 +247,7 @@ export async function discoverEventCandidates(
     )
     .map((outcome) => ({
       code: outcome.code,
-      feedUrl: redactedFeedReference(outcome.feedUrl),
+      feedUrl: redactDiscoveryFeedReference(outcome.feedUrl),
     }));
 
   return {
@@ -247,7 +278,7 @@ function sourceConfidence(candidate: DiscoveryEventCandidate): number {
   return Math.min(0.95, 0.55 + facts * 0.06);
 }
 
-function catalogCandidate(
+export function prepareDiscoveredCatalogCandidate(
   event: EnrichedDiscoveryEvent,
 ): DiscoveredCatalogEventInput | null {
   if (!event.city || !event.venue) {
@@ -256,7 +287,7 @@ function catalogCandidate(
 
   const extractedFacts: Record<string, JsonValue> = {
     enrichedBy: event.enrichedBy,
-    feedUrl: event.feedUrl,
+    feedUrl: redactDiscoveryFeedReference(new URL(event.feedUrl)),
     ...(event.endsAt ? { endsAt: event.endsAt } : {}),
     titleEn: event.enrichment.titleEn,
     ...(event.enrichment.descriptionEn
@@ -396,6 +427,9 @@ export async function runEventDiscovery(
   const catalog = await import("@/lib/catalog-postgres");
 
   const locked = await catalog.withEventDiscoveryLock(async (client) => {
+    let feedOutcomes: DiscoveryFeedOutcome[] =
+      pendingDiscoveryFeedOutcomes(feedUrls);
+    let feedsChecked = false;
     const run = await catalog.startEventDiscoveryRun(
       {
         model: process.env.GEMINI_API_KEY?.trim()
@@ -412,6 +446,7 @@ export async function runEventDiscovery(
           ),
           feedsConfigured: feedUrls.length,
           googleSearchGrounding: false,
+          ...discoveryFeedOutcomeMetadata(feedOutcomes),
         },
       },
       client,
@@ -431,6 +466,11 @@ export async function runEventDiscovery(
         now,
         windowEnd,
       });
+      feedOutcomes = completedDiscoveryFeedOutcomes(
+        feedUrls,
+        discovery.failures,
+      );
+      feedsChecked = true;
       candidatesFound = discovery.candidates.length;
 
       if (discovery.feedsSucceeded === 0) {
@@ -450,7 +490,7 @@ export async function runEventDiscovery(
       );
 
       for (const event of enriched) {
-        const candidate = catalogCandidate(event);
+        const candidate = prepareDiscoveredCatalogCandidate(event);
         if (!candidate) {
           candidatesRejected += 1;
           continue;
@@ -502,6 +542,7 @@ export async function runEventDiscovery(
           eventsUpdated,
           eventsUnchanged,
           candidatesRejected,
+          metadata: discoveryFeedOutcomeMetadata(feedOutcomes),
         },
         client,
       );
@@ -518,6 +559,14 @@ export async function runEventDiscovery(
         feedFailures: discovery.failures.length,
       };
     } catch (error) {
+      if (!feedsChecked) {
+        const code = failureCode(error);
+        feedOutcomes = feedOutcomes.map((outcome) => ({
+          feedUrl: outcome.feedUrl,
+          status: "failed",
+          failureCode: code,
+        }));
+      }
       await catalog.failEventDiscoveryRun(
         run.id,
         error,
@@ -527,6 +576,7 @@ export async function runEventDiscovery(
           eventsUpdated,
           eventsUnchanged,
           candidatesRejected,
+          metadata: discoveryFeedOutcomeMetadata(feedOutcomes),
         },
         client,
       );

@@ -26,6 +26,7 @@ test("delivery retries prefer fewer attempts, then oldest-first order", async ()
       await store.attachCheckoutSession({
         reservationId: reservation.id,
         stripeCheckoutSessionId,
+        stripeLivemode: false,
       });
       const fulfillment = await store.fulfillCheckoutReservation({
         reservationId: reservation.id,

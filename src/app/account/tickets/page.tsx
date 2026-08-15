@@ -11,11 +11,15 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { MarketplaceFooter } from "@/components/marketplace/MarketplaceFooter";
 import { MarketplaceHeader } from "@/components/marketplace/MarketplaceHeader";
-import { formatEventDate } from "@/components/marketplace/catalog-ui";
 import { getBuyerSession, isAdminSession } from "@/lib/auth";
-import { getEventById, getTicketType } from "@/lib/event";
+import { getEventById } from "@/lib/event";
 import { getLocale, localizeHref } from "@/lib/i18n";
 import { listTicketsByEmail } from "@/lib/store";
+import {
+  formatMoneyTotal,
+  historicalTicketView,
+  isTrustedAdmissionTicket,
+} from "@/lib/ticket-history";
 
 export const dynamic = "force-dynamic";
 
@@ -50,7 +54,7 @@ export default async function MyTicketsPage() {
   const checkedIn = tickets.filter(
     (ticket) =>
       ticket.status === "checked_in" &&
-      getEventById(ticket.eventId)?.checkoutMode !== "test-simulation",
+      isTrustedAdmissionTicket(ticket),
   ).length;
 
   return (
@@ -121,13 +125,10 @@ export default async function MyTicketsPage() {
               <div className="mt-5 grid gap-4 lg:grid-cols-2">
                 {tickets.map((ticket) => {
                   const event = getEventById(ticket.eventId);
-                  const type = getTicketType(
-                    ticket.eventId,
-                    ticket.ticketType,
-                  );
+                  const history = historicalTicketView(ticket);
                   const simulation =
-                    event?.checkoutMode === "test-simulation";
-                  const sourceUrl = safeSourceUrl(event?.sourceUrl);
+                    history.offerKind === "test-simulation";
+                  const legacy = !history.trustedSnapshot;
 
                   return (
                     <article
@@ -141,6 +142,8 @@ export default async function MyTicketsPage() {
                               className={`inline-flex rounded-full px-2.5 py-1 text-xs font-black ${
                                 simulation
                                   ? "bg-amber-50 text-amber-900"
+                                  : legacy
+                                  ? "bg-rose-50 text-rose-800"
                                   : ticket.status === "checked_in"
                                   ? "bg-slate-100 text-slate-600"
                                   : "bg-emerald-50 text-emerald-800"
@@ -151,12 +154,17 @@ export default async function MyTicketsPage() {
                                   <TriangleAlert size={13} aria-hidden="true" />
                                   {copy.testStatus}
                                 </span>
+                              ) : legacy ? (
+                                <span className="inline-flex items-center gap-1.5">
+                                  <TriangleAlert size={13} aria-hidden="true" />
+                                  {copy.legacyStatus}
+                                </span>
                               ) : ticket.status === "checked_in"
                                 ? copy.usedStatus
                                 : copy.validStatus}
                             </span>
                             <h3 className="mt-3 text-xl font-black leading-tight">
-                              {ticket.eventName}
+                              {history.eventName}
                             </h3>
                           </div>
                           <span className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-[#2457ff]">
@@ -171,9 +179,7 @@ export default async function MyTicketsPage() {
                               className="text-slate-400"
                               aria-hidden="true"
                             />
-                            {event
-                              ? formatEventDate(event, false, locale)
-                              : ticket.eventDate}
+                            {history.eventDate}
                           </p>
                           <p className="inline-flex items-center gap-2">
                             <MapPin
@@ -181,7 +187,7 @@ export default async function MyTicketsPage() {
                               className="text-slate-400"
                               aria-hidden="true"
                             />
-                            {ticket.venue}
+                            {history.venue}
                           </p>
                         </div>
                       </div>
@@ -193,12 +199,7 @@ export default async function MyTicketsPage() {
                               {copy.category}
                             </dt>
                             <dd className="mt-1 font-black">
-                              {ticketTypeLabel(
-                                ticket.ticketType,
-                                locale,
-                                type.label,
-                                simulation,
-                              )}
+                              {history.ticketLabel ?? copy.unavailable}
                             </dd>
                           </div>
                           <div>
@@ -211,17 +212,21 @@ export default async function MyTicketsPage() {
                           </div>
                           <div>
                             <dt className="text-xs font-bold uppercase tracking-wide text-slate-500">
-                              {copy.price}
+                              {history.paymentMode === "test"
+                                ? copy.testAmount
+                                : history.paymentMode === "live"
+                                  ? copy.pricePaid
+                                  : copy.recordedAmount}
                             </dt>
                             <dd className="mt-1 font-black">
-                              {new Intl.NumberFormat(
-                                locale === "en" ? "en-GB" : "bg-BG",
-                                {
-                                  style: "currency",
-                                  currency: type.currency,
-                                  maximumFractionDigits: 2,
-                                },
-                              ).format(type.price)}
+                              {history.unitAmountMinor !== null &&
+                              history.currency
+                                ? formatMoneyTotal(
+                                    history.unitAmountMinor,
+                                    history.currency,
+                                    locale,
+                                  )
+                                : copy.unavailable}
                             </dd>
                           </div>
                           <div>
@@ -256,28 +261,35 @@ export default async function MyTicketsPage() {
                         </div>
                       </div>
 
-                      {event && (
+                      {(event ||
+                        (simulation &&
+                          history.sourceUrl &&
+                          history.sourceName)) && (
                         <div className="flex flex-wrap items-center justify-end gap-4 border-t border-slate-100 bg-slate-50 px-5 py-3 text-right">
-                          {simulation && sourceUrl && (
+                          {simulation &&
+                            history.sourceUrl &&
+                            history.sourceName && (
                             <a
-                              href={sourceUrl}
+                              href={history.sourceUrl}
                               target="_blank"
                               rel="noreferrer"
                               className="inline-flex items-center gap-1 text-xs font-black text-[#2457ff] hover:text-blue-800"
                             >
-                              {copy.source(event.sourceName)}
+                              {copy.source(history.sourceName)}
                               <ExternalLink size={13} aria-hidden="true" />
                             </a>
                           )}
-                          <Link
-                            href={localizeHref(
-                              locale,
-                              `/events/${event.slug}`,
-                            )}
-                            className="text-xs font-black text-[#2457ff] hover:text-blue-800"
-                          >
-                            {copy.eventPage}
-                          </Link>
+                          {event && (
+                            <Link
+                              href={localizeHref(
+                                locale,
+                                `/events/${event.slug}`,
+                              )}
+                              className="text-xs font-black text-[#2457ff] hover:text-blue-800"
+                            >
+                              {copy.eventPage}
+                            </Link>
+                          )}
                         </div>
                       )}
                     </article>
@@ -292,20 +304,6 @@ export default async function MyTicketsPage() {
       <MarketplaceFooter />
     </div>
   );
-}
-
-function ticketTypeLabel(
-  type: "fan" | "standard" | "premium",
-  locale: "bg" | "en",
-  fallback: string,
-  simulation = false,
-): string {
-  if (simulation || locale === "bg") return fallback;
-  return {
-    fan: "Fan zone",
-    standard: "Standard",
-    premium: "Premium",
-  }[type];
 }
 
 const ACCOUNT_COPY = {
@@ -325,13 +323,17 @@ const ACCOUNT_COPY = {
     usedStatus: "Използван",
     validStatus: "Валиден",
     testStatus: "Тестов - не важи за вход",
+    legacyStatus: "Стар запис - непотвърден",
     category: "Категория",
     seat: "Място",
     reference: "Референция",
-    price: "Цена",
+    pricePaid: "Платена цена",
+    testAmount: "Тестова сума",
+    recordedAmount: "Записана сума",
     issued: "Издаден",
     details: "Детайли",
     eventPage: "Към страницата на събитието",
+    unavailable: "Няма надеждни данни",
     source: (source: string) => `Източник: ${source}`,
   },
   en: {
@@ -350,31 +352,20 @@ const ACCOUNT_COPY = {
     usedStatus: "Used",
     validStatus: "Valid",
     testStatus: "Test - not valid for entry",
+    legacyStatus: "Legacy record - unverified",
     category: "Category",
     seat: "Seat",
     reference: "Reference",
-    price: "Price",
+    pricePaid: "Price paid",
+    testAmount: "Test amount",
+    recordedAmount: "Recorded amount",
     issued: "Issued",
     details: "Details",
     eventPage: "View event page",
+    unavailable: "Reliable data unavailable",
     source: (source: string) => `Source: ${source}`,
   },
 } as const;
-
-function safeSourceUrl(value: string | undefined): string | null {
-  if (!value) {
-    return null;
-  }
-
-  try {
-    const url = new URL(value);
-    return url.protocol === "https:" && !url.username && !url.password
-      ? url.href
-      : null;
-  } catch {
-    return null;
-  }
-}
 
 function Stat({ label, value }: { label: string; value: string }) {
   return (

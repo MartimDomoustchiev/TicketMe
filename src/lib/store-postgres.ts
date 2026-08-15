@@ -94,6 +94,7 @@ async function prepareSchema(): Promise<void> {
       storage_url TEXT NOT NULL DEFAULT '',
       qr_secret TEXT NOT NULL,
       status TEXT NOT NULL CHECK (status IN ('issued', 'checked_in')),
+      stripe_livemode BOOLEAN,
       purchase_offer_kind TEXT
         CHECK (purchase_offer_kind IN ('admission', 'test-simulation')),
       purchase_unit_amount_minor INTEGER
@@ -125,6 +126,7 @@ async function prepareSchema(): Promise<void> {
       ADD COLUMN IF NOT EXISTS checkout_reservation_id TEXT,
       ADD COLUMN IF NOT EXISTS stripe_checkout_session_id TEXT,
       ADD COLUMN IF NOT EXISTS stripe_payment_intent_id TEXT,
+      ADD COLUMN IF NOT EXISTS stripe_livemode BOOLEAN,
       ADD COLUMN IF NOT EXISTS purchase_offer_kind TEXT,
       ADD COLUMN IF NOT EXISTS purchase_unit_amount_minor INTEGER,
       ADD COLUMN IF NOT EXISTS purchase_currency TEXT,
@@ -193,6 +195,7 @@ async function prepareSchema(): Promise<void> {
       fulfilled_at TIMESTAMPTZ,
       stripe_checkout_session_id TEXT UNIQUE,
       stripe_payment_intent_id TEXT UNIQUE,
+      stripe_livemode BOOLEAN,
       ticket_id TEXT UNIQUE REFERENCES tickets(id) ON DELETE SET NULL,
       delivery_status TEXT
         CHECK (
@@ -236,7 +239,8 @@ async function prepareSchema(): Promise<void> {
       ADD COLUMN IF NOT EXISTS purchase_venue TEXT,
       ADD COLUMN IF NOT EXISTS purchase_ticket_label TEXT,
       ADD COLUMN IF NOT EXISTS purchase_source_name TEXT,
-      ADD COLUMN IF NOT EXISTS purchase_source_url TEXT
+      ADD COLUMN IF NOT EXISTS purchase_source_url TEXT,
+      ADD COLUMN IF NOT EXISTS stripe_livemode BOOLEAN
   `;
   await db`
     CREATE INDEX IF NOT EXISTS checkout_reservations_expiry_idx
@@ -416,6 +420,10 @@ function mapTicket(row: Record<string, unknown>): StoredTicket {
     qrSecret: String(row.qr_secret),
     status: String(row.status) as TicketStatus,
     purchaseSnapshot: mapPurchaseSnapshot(row),
+    stripeLivemode:
+      typeof row.stripe_livemode === "boolean"
+        ? row.stripe_livemode
+        : null,
     ...(checkoutReservationId ? { checkoutReservationId } : {}),
     ...(stripeCheckoutSessionId ? { stripeCheckoutSessionId } : {}),
     ...(stripePaymentIntentId ? { stripePaymentIntentId } : {}),
@@ -446,6 +454,10 @@ function mapReservation(row: Record<string, unknown>): CheckoutReservation {
     stripeCheckoutSessionId: nullableString(
       row.stripe_checkout_session_id,
     ),
+    stripeLivemode:
+      typeof row.stripe_livemode === "boolean"
+        ? row.stripe_livemode
+        : null,
     stripePaymentIntentId: nullableString(row.stripe_payment_intent_id),
     ticketId: nullableString(row.ticket_id),
     deliveryStatus: row.delivery_status
@@ -1266,12 +1278,38 @@ export async function attachCheckoutSession(
         };
       }
       if (reservation.stripeCheckoutSessionId) {
+        if (
+          typeof reservation.stripeLivemode === "boolean" &&
+          reservation.stripeLivemode !== input.stripeLivemode
+        ) {
+          return {
+            reservation,
+            error: "CHECKOUT_PAYMENT_MODE_MISMATCH",
+            changedEventId: null,
+          };
+        }
+        if (typeof reservation.stripeLivemode !== "boolean") {
+          const modeRows = await transaction`
+            UPDATE checkout_reservations
+            SET stripe_livemode = ${input.stripeLivemode}
+            WHERE id = ${reservation.id}
+            RETURNING *
+          `;
+          return {
+            reservation: mapReservation(
+              modeRows[0] as Record<string, unknown>,
+            ),
+            error: null,
+            changedEventId: null,
+          };
+        }
         return { reservation, error: null, changedEventId: null };
       }
 
       const updatedRows = await transaction`
         UPDATE checkout_reservations
         SET stripe_checkout_session_id = ${input.stripeCheckoutSessionId},
+            stripe_livemode = ${input.stripeLivemode},
             status = 'checkout_created'
         WHERE id = ${reservation.id}
         RETURNING *
@@ -1610,7 +1648,7 @@ export async function fulfillCheckoutReservation(
           event_id, event_name, event_date, venue, issued_at,
           storage_key, storage_url, qr_secret, status,
           checkout_reservation_id, stripe_checkout_session_id,
-          stripe_payment_intent_id,
+          stripe_payment_intent_id, stripe_livemode,
           purchase_offer_kind, purchase_unit_amount_minor,
           purchase_currency, purchase_event_name, purchase_event_date,
           purchase_venue, purchase_ticket_label, purchase_source_name,
@@ -1634,6 +1672,7 @@ export async function fulfillCheckoutReservation(
           ${reservation.id},
           ${reservation.stripeCheckoutSessionId},
           ${input.stripePaymentIntentId ?? null},
+          ${reservation.stripeLivemode ?? null},
           ${purchaseSnapshot.offerKind},
           ${purchaseSnapshot.unitAmountMinor},
           ${purchaseSnapshot.currency},

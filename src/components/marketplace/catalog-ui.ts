@@ -239,28 +239,41 @@ export function localizedEventTagline(
   return `${categoryLabel(event.category, locale)} in ${localizeCity(event.city, locale)} · ${event.venue}`;
 }
 
+export function localizedEventTitle(
+  event: CatalogEvent,
+  locale: Locale,
+): string {
+  return locale === "en" && event.titleEn?.trim()
+    ? event.titleEn
+    : event.title;
+}
+
 export function localizedEventDescription(
   event: CatalogEvent,
   locale: Locale,
 ): string {
   if (locale === "bg") return event.description;
+  if (event.descriptionEn?.trim()) return event.descriptionEn;
   if (event.id === EVENT.id) {
     return "Deep Purple arrive at Arena 8888 Sofia for a full-scale live show featuring the songs that defined generations of rock music.";
   }
+  const title = localizedEventTitle(event, locale);
   if (event.saleMode === "external") {
     const source = event.sourceOfficial
       ? "official event source"
       : "linked event source";
-    return `${event.title} takes place at ${formatVenueLocation(event, locale)}. Check the ${source} for current programme, admission and access details.`;
+    return `${title} takes place at ${formatVenueLocation(event, locale)}. Check the ${source} for current programme, admission and access details.`;
   }
-  return `${event.title} comes to ${event.venue}, ${localizeCity(event.city, locale)}. Choose your ticket category and receive your e-ticket directly by email.`;
+  return `${title} comes to ${event.venue}, ${localizeCity(event.city, locale)}. Choose your ticket category and receive your e-ticket directly by email.`;
 }
 
 export function catalogSearchText(event: CatalogEvent): string {
   return [
     event.title,
     event.name,
+    event.titleEn,
     event.tagline,
+    event.descriptionEn,
     localizedEventTagline(event, "en"),
     event.category,
     categoryLabel(event.category, "bg"),

@@ -380,10 +380,10 @@ function safeResourceUrl(
   value: unknown,
   fallback: string,
   allowedHosts: readonly DiscoveryAllowedHost[],
-): string {
+): string | undefined {
   const text = cleanText(value, 2_048);
   if (!text) {
-    return fallback;
+    return undefined;
   }
 
   try {
@@ -391,9 +391,9 @@ function safeResourceUrl(
     const sourceUrl = parseSafeDiscoveryUrl(new URL(text, feedUrl));
     return isAllowedDiscoverySourceUrl(sourceUrl, feedUrl, allowedHosts)
       ? sourceUrl.href
-      : fallback;
+      : undefined;
   } catch {
-    return fallback;
+    return undefined;
   }
 }
 

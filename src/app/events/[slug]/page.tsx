@@ -26,6 +26,7 @@ import {
   formatVenueLocation,
   localizedEventDescription,
   localizedEventTagline,
+  localizedEventTitle,
   localizeCity,
 } from "@/components/marketplace/catalog-ui";
 import { getBuyerSession } from "@/lib/auth";
@@ -65,15 +66,16 @@ export async function generateMetadata({
   }
 
   const ticketLabel = locale === "en" ? "tickets" : "билети";
+  const eventTitle = localizedEventTitle(event, locale);
 
   return {
-    title: `${event.title} — ${ticketLabel}`,
+    title: `${eventTitle} — ${ticketLabel}`,
     description: localizedEventDescription(event, locale),
     openGraph: {
-      title: `${event.title} — ${ticketLabel}`,
+      title: `${eventTitle} — ${ticketLabel}`,
       description: localizedEventTagline(event, locale),
       type: "website",
-      images: [{ url: event.image, alt: event.title }],
+      images: [{ url: event.image, alt: eventTitle }],
     },
   };
 }
@@ -109,11 +111,12 @@ export default async function EventPage({ params }: EventPageProps) {
     listRelatedCatalogEvents(event),
   ]);
   const copy = EVENT_COPY[locale];
+  const eventTitle = localizedEventTitle(event, locale);
 
   const eventSchema = {
     "@context": "https://schema.org",
     "@type": "Event",
-    name: event.title,
+    name: eventTitle,
     description: localizedEventDescription(event, locale),
     image: [new URL(event.heroImage, getBaseUrl()).toString()],
     startDate: event.startsAt,
@@ -190,7 +193,7 @@ export default async function EventPage({ params }: EventPageProps) {
             {categoryLabel(event.category, locale)}
           </Link>
           <ChevronRight size={14} className="shrink-0" aria-hidden="true" />
-          <span className="truncate font-bold text-slate-800">{event.title}</span>
+          <span className="truncate font-bold text-slate-800">{eventTitle}</span>
         </nav>
       </section>
 
@@ -227,7 +230,7 @@ export default async function EventPage({ params }: EventPageProps) {
               {categoryLabel(event.category, locale)}
             </span>
             <h1 className="mt-5 text-4xl font-black leading-[1.05] tracking-[-0.045em] sm:text-6xl lg:text-7xl">
-              {event.title}
+              {eventTitle}
             </h1>
             <p className="mt-5 max-w-2xl text-lg font-medium leading-8 text-slate-200">
               {localizedEventTagline(event, locale)}
@@ -320,7 +323,7 @@ export default async function EventPage({ params }: EventPageProps) {
               {copy.aboutEvent}
             </p>
             <h2 className="mt-3 text-3xl font-black tracking-[-0.035em]">
-              {event.title}
+              {eventTitle}
             </h2>
             <p className="mt-5 whitespace-pre-line text-base leading-8 text-slate-600">
               {localizedEventDescription(event, locale)}
