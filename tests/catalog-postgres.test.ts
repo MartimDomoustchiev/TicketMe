@@ -5,6 +5,7 @@ import test from "node:test";
 import {
   buildCatalogEventFingerprint,
   buildCatalogSourceUrlHash,
+  canPreserveTicketSellerClaim,
   canonicalizeCatalogSourceUrl,
   prepareDiscoveredCatalogEvent,
 } from "../src/lib/catalog-types";
@@ -76,6 +77,33 @@ test("source URL identity removes tracking noise and sorts useful parameters", (
         "https://user:password@example.com/event",
       ),
     /CATALOG_INVALID_SOURCE_URL/,
+  );
+});
+
+test("ticket-seller claims survive refreshes only for the same source URL", () => {
+  assert.equal(
+    canPreserveTicketSellerClaim(
+      true,
+      "https://tickets.example/events/show/",
+      "https://tickets.example/events/show?utm_source=feed#tickets",
+    ),
+    true,
+  );
+  assert.equal(
+    canPreserveTicketSellerClaim(
+      true,
+      "https://tickets.example/events/show",
+      "https://feed.example/articles/show",
+    ),
+    false,
+  );
+  assert.equal(
+    canPreserveTicketSellerClaim(
+      undefined,
+      "https://tickets.example/events/show",
+      "https://tickets.example/events/show",
+    ),
+    false,
   );
 });
 
