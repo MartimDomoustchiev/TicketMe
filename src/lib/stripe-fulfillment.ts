@@ -14,6 +14,7 @@ import {
   getCheckoutReservation,
   getCheckoutReservationBySession,
   getTicket,
+  listTicketsByCheckoutReservation,
   releaseTicketDelivery,
   updateTicketStorage,
   type CheckoutFulfillmentResult,
@@ -22,12 +23,55 @@ import {
 import { getStripeClient } from "@/lib/stripe";
 import { assertStripeCheckoutPurchaseSnapshot } from "@/lib/stripe-offer-safety";
 import { readTicketPdf, storeTicketPdf } from "@/lib/storage";
+import { invalidatePublicTicketingCache } from "@/lib/ticketing-cache";
 
 export type CheckoutDeliveryResult = {
   ticket: StoredTicket;
+  tickets: StoredTicket[];
   delivered: boolean;
   inProgress: boolean;
 };
+
+const TICKET_DELIVERY_CONCURRENCY = 3;
+
+export async function runTicketDeliveryBatch<Item, Result>(
+  items: readonly Item[],
+  deliver: (item: Item, index: number) => Promise<Result>,
+): Promise<Result[]> {
+  const results = new Array<Result>(items.length);
+  let nextIndex = 0;
+  let failed = false;
+  let firstError: unknown;
+
+  async function worker(): Promise<void> {
+    while (!failed) {
+      const index = nextIndex;
+      nextIndex += 1;
+      if (index >= items.length) {
+        return;
+      }
+
+      try {
+        results[index] = await deliver(items[index], index);
+      } catch (error) {
+        failed = true;
+        firstError = error;
+      }
+    }
+  }
+
+  await Promise.all(
+    Array.from(
+      { length: Math.min(TICKET_DELIVERY_CONCURRENCY, items.length) },
+      () => worker(),
+    ),
+  );
+
+  if (failed) {
+    throw firstError;
+  }
+  return results;
+}
 
 export function shouldStoreTicketPdf(input: {
   storedPdfFound: boolean;
@@ -121,13 +165,18 @@ export async function recordPaidCheckout(
 
   assertStripeCheckoutPurchaseSnapshot(session, reservation);
 
+  const qrSecrets = Array.from({ length: reservation.quantity }, () =>
+    randomBytes(18).toString("base64url"),
+  );
+
   const result = await fulfillCheckoutReservation({
     reservationId,
     stripeCheckoutSessionId: session.id,
     stripePaymentIntentId: paymentIntentId(session),
     storageKey: "",
     storageUrl: "",
-    qrSecret: randomBytes(18).toString("base64url"),
+    qrSecret: qrSecrets[0],
+    qrSecrets,
   });
 
   if (!result) {
@@ -148,16 +197,23 @@ export async function deliverCheckoutTicket(
 
   if (!claim) {
     const reservation = await getCheckoutReservation(reservationId);
-    const ticket = reservation?.ticketId
-      ? await getTicket(reservation.ticketId)
-      : null;
+    const tickets = reservation
+      ? await listTicketsByCheckoutReservation(reservation.id)
+      : [];
+    const ticket = tickets[0] ??
+      (reservation?.ticketId ? await getTicket(reservation.ticketId) : null);
 
     if (!reservation || !ticket) {
       throw new Error("CHECKOUT_TICKET_NOT_FOUND");
     }
+    const resolvedTickets = tickets.length > 0 ? tickets : [ticket];
+    if (resolvedTickets.length !== reservation.quantity) {
+      throw new Error("CHECKOUT_TICKET_QUANTITY_MISMATCH");
+    }
 
     return {
       ticket,
+      tickets: resolvedTickets,
       delivered: reservation.deliveryStatus === "completed",
       inProgress: reservation.deliveryStatus === "processing",
     };
@@ -165,12 +221,8 @@ export async function deliverCheckoutTicket(
 
   try {
     const purchaseSnapshot = claim.reservation.purchaseSnapshot;
-    const ticketSnapshot = claim.ticket.purchaseSnapshot;
-    if (!purchaseSnapshot || !ticketSnapshot) {
+    if (!purchaseSnapshot) {
       throw new Error("CHECKOUT_PURCHASE_SNAPSHOT_MISSING");
-    }
-    if (!checkoutPurchaseSnapshotsEqual(purchaseSnapshot, ticketSnapshot)) {
-      throw new Error("CHECKOUT_PURCHASE_SNAPSHOT_MISMATCH");
     }
     const ticketPresentation = {
       offerKind: purchaseSnapshot.offerKind,
@@ -180,82 +232,102 @@ export async function deliverCheckoutTicket(
       unitAmountMinor: purchaseSnapshot.unitAmountMinor,
       currency: purchaseSnapshot.currency,
     };
-    const presentationTicket = {
-      ...claim.ticket,
-      eventName: purchaseSnapshot.eventName,
-      eventDate: purchaseSnapshot.eventDate,
-      venue: purchaseSnapshot.venue,
-    };
-    const verificationUrl = `${baseUrl}/api/tickets/${claim.ticket.id}/verify?secret=${claim.ticket.qrSecret}`;
-    let pdf =
-      claim.ticket.storageKey &&
-      (await readTicketPdf({
-        id: claim.ticket.id,
-        storageKey: claim.ticket.storageKey,
-      }));
-    const storedPdfFound = Boolean(pdf);
-
-    if (!pdf) {
-      pdf = await createTicketPdf({
-        ticket: presentationTicket,
-        verificationUrl,
-        locale: claim.reservation.locale,
-        ...ticketPresentation,
-      });
+    if (claim.tickets.length !== claim.reservation.quantity) {
+      throw new Error("CHECKOUT_TICKET_QUANTITY_MISMATCH");
     }
 
-    let storage = {
-      storageKey: claim.ticket.storageKey,
-      storageUrl: claim.ticket.storageUrl,
-    };
+    const deliveredTickets = await runTicketDeliveryBatch(
+      claim.tickets,
+      async (claimedTicket) => {
+        const ticketSnapshot = claimedTicket.purchaseSnapshot;
+        if (!ticketSnapshot) {
+          throw new Error("CHECKOUT_PURCHASE_SNAPSHOT_MISSING");
+        }
+        if (
+          !checkoutPurchaseSnapshotsEqual(purchaseSnapshot, ticketSnapshot)
+        ) {
+          throw new Error("CHECKOUT_PURCHASE_SNAPSHOT_MISMATCH");
+        }
 
-    if (
-      shouldStoreTicketPdf({
-        storedPdfFound,
-        ...storage,
-      })
-    ) {
-      storage = await storeTicketPdf({
-        id: claim.ticket.id,
-        pdf,
-        baseUrl,
-      });
-      const updated = await updateTicketStorage({
-        id: claim.ticket.id,
-        ...storage,
-      });
-      if (!updated) {
-        throw new Error("TICKET_STORAGE_METADATA_FAILED");
-      }
-    }
+        const presentationTicket = {
+          ...claimedTicket,
+          eventName: purchaseSnapshot.eventName,
+          eventDate: purchaseSnapshot.eventDate,
+          venue: purchaseSnapshot.venue,
+        };
+        const verificationUrl = `${baseUrl}/api/tickets/${claimedTicket.id}/verify?secret=${claimedTicket.qrSecret}`;
+        let pdf =
+          claimedTicket.storageKey &&
+          (await readTicketPdf({
+            id: claimedTicket.id,
+            storageKey: claimedTicket.storageKey,
+          }));
+        const storedPdfFound = Boolean(pdf);
 
-    await sendTicketEmail({
-      to: claim.ticket.buyerEmail,
-      name: claim.ticket.buyerName,
-      ticketId: claim.ticket.id,
-      eventName: purchaseSnapshot.eventName,
-      downloadUrl: storage.storageUrl,
-      pdf,
-      locale: claim.reservation.locale,
-      ...ticketPresentation,
-    });
+        if (!pdf) {
+          pdf = await createTicketPdf({
+            ticket: presentationTicket,
+            verificationUrl,
+            locale: claim.reservation.locale,
+            ...ticketPresentation,
+          });
+        }
+
+        let storage = {
+          storageKey: claimedTicket.storageKey,
+          storageUrl: claimedTicket.storageUrl,
+        };
+
+        if (
+          shouldStoreTicketPdf({
+            storedPdfFound,
+            ...storage,
+          })
+        ) {
+          storage = await storeTicketPdf({
+            id: claimedTicket.id,
+            pdf,
+            baseUrl,
+          });
+          const updated = await updateTicketStorage({
+            id: claimedTicket.id,
+            ...storage,
+          });
+          if (!updated) {
+            throw new Error("TICKET_STORAGE_METADATA_FAILED");
+          }
+        }
+
+        await sendTicketEmail({
+          to: claimedTicket.buyerEmail,
+          name: claimedTicket.buyerName,
+          ticketId: claimedTicket.id,
+          eventName: purchaseSnapshot.eventName,
+          downloadUrl: storage.storageUrl,
+          pdf,
+          locale: claim.reservation.locale,
+          ...ticketPresentation,
+        });
+
+        const deliveredTicket = await getTicket(claimedTicket.id);
+        if (!deliveredTicket) {
+          throw new Error("CHECKOUT_TICKET_NOT_FOUND");
+        }
+        return deliveredTicket;
+      },
+    );
 
     const completed = await completeTicketDelivery({
       reservationId: claim.reservation.id,
       claimToken: claim.claimToken,
-      ...storage,
     });
     if (!completed) {
       throw new Error("TICKET_DELIVERY_COMPLETION_FAILED");
     }
 
-    const deliveredTicket = await getTicket(claim.ticket.id);
-    if (!deliveredTicket) {
-      throw new Error("CHECKOUT_TICKET_NOT_FOUND");
-    }
-
     return {
-      ticket: deliveredTicket,
+      ticket: deliveredTickets[0],
+      tickets: deliveredTickets,
       delivered: true,
       inProgress: false,
     };
@@ -297,5 +369,8 @@ export async function expireStripeCheckout(
     return;
   }
 
-  await expireCheckoutReservation(reservation.id);
+  const expired = await expireCheckoutReservation(reservation.id);
+  if (expired?.status === "expired") {
+    invalidatePublicTicketingCache();
+  }
 }

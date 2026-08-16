@@ -2,6 +2,7 @@
 
 import {
   createContext,
+  useCallback,
   useContext,
   useEffect,
   useMemo,
@@ -19,6 +20,7 @@ export type LiveTicketingStatus = {
 
 type LiveTicketingContextValue = LiveTicketingStatus & {
   isLive: boolean;
+  updateAvailability: (availability: Availability) => void;
 };
 
 type Props = {
@@ -64,6 +66,16 @@ export function LiveTicketingProvider({
       : null,
   );
   const [isLive, setIsLive] = useState(false);
+
+  const updateAvailability = useCallback(
+    (availability: Availability) => {
+      setStatus((current) => ({
+        availability,
+        activity: current?.activity ?? initialActivity,
+      }));
+    },
+    [initialActivity],
+  );
 
   useEffect(() => {
     if (!eventId || !initialAvailability) {
@@ -134,8 +146,8 @@ export function LiveTicketingProvider({
   }, [eventId, initialAvailability]);
 
   const value = useMemo<LiveTicketingContextValue | null>(
-    () => (status ? { ...status, isLive } : null),
-    [isLive, status],
+    () => (status ? { ...status, isLive, updateAvailability } : null),
+    [isLive, status, updateAvailability],
   );
 
   return (

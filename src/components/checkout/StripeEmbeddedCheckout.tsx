@@ -9,11 +9,16 @@ import { Loader2, ShieldCheck } from "lucide-react";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-export type StripeTicketResult = {
+export type StripeIssuedTicketResult = {
   ticketId: string;
   ticketUrl: string;
   downloadUrl: string;
   printUrl: string;
+};
+
+export type StripeTicketResult = StripeIssuedTicketResult & {
+  tickets: StripeIssuedTicketResult[];
+  quantity: number;
   emailDelivered: boolean;
   paymentReference: string;
 };
@@ -96,10 +101,11 @@ export function StripeEmbeddedCheckout({
             locale,
           }),
         });
-        const payload = (await response.json()) as Partial<StripeTicketResult> & {
-          error?: string;
-          status?: string;
-        };
+        const payload = (await response.json()) as Partial<StripeTicketResult> &
+          Partial<StripeIssuedTicketResult> & {
+            error?: string;
+            status?: string;
+          };
 
         if (
           response.ok &&
@@ -110,7 +116,25 @@ export function StripeEmbeddedCheckout({
           payload.printUrl &&
           payload.paymentReference
         ) {
-          onCompleteRef.current(payload as StripeTicketResult);
+          const primaryTicket: StripeIssuedTicketResult = {
+            ticketId: payload.ticketId,
+            ticketUrl: payload.ticketUrl,
+            downloadUrl: payload.downloadUrl,
+            printUrl: payload.printUrl,
+          };
+          onCompleteRef.current({
+            ...primaryTicket,
+            tickets:
+              Array.isArray(payload.tickets) && payload.tickets.length > 0
+                ? payload.tickets
+                : [primaryTicket],
+            quantity:
+              typeof payload.quantity === "number" && payload.quantity > 0
+                ? payload.quantity
+                : 1,
+            emailDelivered: payload.emailDelivered === true,
+            paymentReference: payload.paymentReference,
+          });
           return;
         }
       } catch {

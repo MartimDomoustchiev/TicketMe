@@ -63,7 +63,24 @@ test("public catalogue reads use explicit invalidation with a safety TTL", async
 });
 
 test("live public reads retry inside their single-flight boundary", async () => {
-  const availability = await source("src/lib/public-availability.ts");
+  const [availability, cache] = await Promise.all([
+    source("src/lib/public-availability.ts"),
+    source("src/lib/ticketing-cache.ts"),
+  ]);
+
+  assert.match(
+    cache,
+    /PUBLIC_TICKETING_CACHE_TAG\s*=\s*"ticketme-public-ticketing"/,
+  );
+  assert.match(
+    cache,
+    /revalidateTag\(PUBLIC_TICKETING_CACHE_TAG, \{ expire: 0 \}\)/,
+  );
+  assert.equal(
+    [...availability.matchAll(/tags:\s*\[PUBLIC_TICKETING_CACHE_TAG\]/g)]
+      .length,
+    2,
+  );
 
   assert.match(
     availability,
@@ -73,6 +90,24 @@ test("live public reads retry inside their single-flight boundary", async () => 
     availability,
     /singleFlight\(\s*`database-purchase-activity:\$\{eventId\}`,[\s\S]*?retryTransientPostgresRead\("purchase-activity"/,
   );
+});
+
+test("ticket inventory mutations invalidate and republish live availability", async () => {
+  const [checkout, cancel, fulfillment] = await Promise.all([
+    source("src/app/api/stripe/checkout/route.ts"),
+    source("src/app/api/stripe/cancel/route.ts"),
+    source("src/lib/stripe-fulfillment.ts"),
+  ]);
+
+  assert.match(
+    checkout,
+    /attachCheckoutSession\([\s\S]*?invalidatePublicTicketingCache\(\);[\s\S]*?getAvailability\(event\.id\)[\s\S]*?emitAvailability\(event\.id, availability\)/,
+  );
+  assert.match(
+    cancel,
+    /cancelCheckoutReservation\(reservation\.id\)[\s\S]*?invalidatePublicTicketingCache\(\);[\s\S]*?getAvailability\(reservation\.eventId\)[\s\S]*?emitAvailability\(reservation\.eventId, availability\)/,
+  );
+  assert.match(fulfillment, /invalidatePublicTicketingCache\(\)/);
 });
 
 test("all possibly committed catalogue mutations invalidate the shared tag", async () => {

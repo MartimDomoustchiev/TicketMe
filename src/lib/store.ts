@@ -265,6 +265,15 @@ export function listTicketsByEmail(
     : fileStore.listTicketsByEmail(buyerEmail);
 }
 
+export function listTicketsByCheckoutReservation(
+  reservationId: string,
+): Promise<StoredTicket[]> {
+  assertPersistenceConfigured();
+  return hasPostgres()
+    ? postgresStore.listTicketsByCheckoutReservation(reservationId)
+    : fileStore.listTicketsByCheckoutReservation(reservationId);
+}
+
 export function markTicketCheckedIn(
   id: string,
   secret: string,

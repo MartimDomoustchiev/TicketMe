@@ -12,6 +12,7 @@ import {
   normalizeCheckoutPurchaseSnapshot,
   type CheckoutPurchaseSnapshot,
 } from "@/lib/checkout-purchase-snapshot";
+import { ticketQuantityOrDefault } from "@/lib/ticket-quantity";
 
 export type { CheckoutPurchaseSnapshot } from "@/lib/checkout-purchase-snapshot";
 
@@ -52,6 +53,7 @@ export type CheckoutReservation = {
   id: string;
   eventId: string;
   ticketType: TicketTypeId;
+  quantity: number;
   buyerName: string;
   buyerEmail: string;
   locale: CheckoutLocale;
@@ -78,12 +80,14 @@ type StoredCheckoutReservation = CheckoutReservation & {
 export type CheckoutFulfillmentResult = {
   reservation: CheckoutReservation;
   ticket: StoredTicket;
+  tickets: StoredTicket[];
   created: boolean;
 };
 
 export type TicketDeliveryClaim = {
   reservation: CheckoutReservation;
   ticket: StoredTicket;
+  tickets: StoredTicket[];
   claimToken: string;
   leaseExpiresAt: string;
 };
@@ -93,6 +97,7 @@ export type ReserveCheckoutTicketInput = {
   buyerName: string;
   buyerEmail: string;
   ticketType: TicketTypeId;
+  quantity?: number;
   locale?: CheckoutLocale;
   expiresInMs?: number;
 };
@@ -110,6 +115,7 @@ export type FulfillCheckoutReservationInput = {
   storageKey: string;
   storageUrl: string;
   qrSecret: string;
+  qrSecrets?: string[];
 };
 
 export type ClaimTicketDeliveryInput = {
@@ -152,7 +158,7 @@ export type PurchaseActivity = {
 type EventInventory = Partial<Record<TicketTypeId, number>>;
 
 type DbState = {
-  version: 4;
+  version: 5;
   inventory: Record<string, EventInventory>;
   verificationTokens: Record<string, VerificationToken>;
   tickets: Record<string, StoredTicket>;
@@ -200,7 +206,7 @@ function initialRemaining(eventId: string): Record<TicketTypeId, number> {
 
 function initialState(): DbState {
   return {
-    version: 4,
+    version: 5,
     inventory: {
       [EVENT.id]: initialRemaining(EVENT.id),
     },
@@ -253,6 +259,7 @@ function normalizeReservation(
     id: reservation.id,
     eventId: reservation.eventId,
     ticketType: reservation.ticketType,
+    quantity: ticketQuantityOrDefault(reservation.quantity) || 1,
     buyerName: reservation.buyerName,
     buyerEmail: reservation.buyerEmail.toLowerCase(),
     locale: reservation.locale === "en" ? "en" : "bg",
@@ -344,7 +351,7 @@ function normalizeState(state: LegacyDbState): DbState {
   );
 
   return {
-    version: 4,
+    version: 5,
     inventory,
     verificationTokens: state.verificationTokens ?? {},
     tickets,
@@ -480,7 +487,8 @@ function releaseReservationInventory(
     const remainingByType = eventInventory(state, event.id);
     remainingByType[reservation.ticketType] = Math.min(
       ticketType.capacity,
-      (remainingByType[reservation.ticketType] ?? 0) + 1,
+      (remainingByType[reservation.ticketType] ?? 0) +
+        reservation.quantity,
     );
   }
 
@@ -604,6 +612,86 @@ function createStoredTicket(input: {
       ? { stripePaymentIntentId: input.stripePaymentIntentId }
       : {}),
   };
+}
+
+function compareTickets(left: StoredTicket, right: StoredTicket): number {
+  return (
+    left.issuedAt.localeCompare(right.issuedAt) ||
+    left.id.localeCompare(right.id)
+  );
+}
+
+function ticketsForCheckoutReservation(
+  state: DbState,
+  reservationId: string,
+  primaryTicketId?: string | null,
+): StoredTicket[] {
+  const ticketsById = new Map<string, StoredTicket>();
+  for (const ticket of Object.values(state.tickets)) {
+    if (ticket.checkoutReservationId === reservationId) {
+      ticketsById.set(ticket.id, ticket);
+    }
+  }
+
+  if (primaryTicketId) {
+    const primary = state.tickets[primaryTicketId];
+    if (primary) {
+      ticketsById.set(primary.id, primary);
+    }
+  }
+
+  const tickets = [...ticketsById.values()].sort(compareTickets);
+  if (!primaryTicketId) {
+    return tickets;
+  }
+
+  const primaryIndex = tickets.findIndex(
+    (ticket) => ticket.id === primaryTicketId,
+  );
+  if (primaryIndex > 0) {
+    const [primary] = tickets.splice(primaryIndex, 1);
+    tickets.unshift(primary);
+  }
+  return tickets;
+}
+
+function resolveFulfillmentQrSecrets(
+  input: FulfillCheckoutReservationInput,
+  quantity: number,
+): string[] {
+  if (input.qrSecrets !== undefined) {
+    if (
+      !Array.isArray(input.qrSecrets) ||
+      input.qrSecrets.length !== quantity ||
+      input.qrSecrets.some(
+        (secret) => typeof secret !== "string" || !secret.trim(),
+      ) ||
+      new Set(input.qrSecrets).size !== quantity
+    ) {
+      throw new Error("INVALID_QR_SECRETS");
+    }
+    return [...input.qrSecrets];
+  }
+
+  if (quantity === 1) {
+    return [input.qrSecret];
+  }
+
+  const secrets: string[] = [];
+  const usedSecrets = new Set<string>();
+  const primarySecret = input.qrSecret.trim()
+    ? input.qrSecret
+    : randomBytes(32).toString("base64url");
+  secrets.push(primarySecret);
+  usedSecrets.add(primarySecret);
+  while (secrets.length < quantity) {
+    const secret = randomBytes(32).toString("base64url");
+    if (!usedSecrets.has(secret)) {
+      usedSecrets.add(secret);
+      secrets.push(secret);
+    }
+  }
+  return secrets;
 }
 
 export async function getAvailability(
@@ -767,6 +855,10 @@ export async function reserveCheckoutTicket(
   input: ReserveCheckoutTicketInput,
 ): Promise<CheckoutReservation> {
   const event = requireEvent(input.eventId ?? EVENT.id);
+  const quantity = ticketQuantityOrDefault(input.quantity);
+  if (!quantity) {
+    throw new Error("INVALID_TICKET_QUANTITY");
+  }
   const ticketType = event.ticketTypes.find(
     (candidate) => candidate.id === input.ticketType,
   );
@@ -802,7 +894,7 @@ export async function reserveCheckoutTicket(
 
     const remainingByType = eventInventory(state, event.id);
     const remaining = remainingByType[input.ticketType] ?? 0;
-    if (remaining <= 0) {
+    if (remaining < quantity) {
       throw new Error("SOLD_OUT");
     }
 
@@ -816,6 +908,7 @@ export async function reserveCheckoutTicket(
       id,
       eventId: event.id,
       ticketType: input.ticketType,
+      quantity,
       buyerName: input.buyerName.trim(),
       buyerEmail: normalizedBuyerEmail,
       locale: input.locale === "en" ? "en" : "bg",
@@ -836,14 +929,14 @@ export async function reserveCheckoutTicket(
       purchaseSnapshot: { ...purchaseSnapshot },
     };
 
-    remainingByType[input.ticketType] = remaining - 1;
+    remainingByType[input.ticketType] = remaining - quantity;
     state.checkoutReservations[id] = storedReservation;
     state.auditLog.push({
       id: randomBytes(10).toString("hex"),
       at: createdAt,
       action: "checkout_reservation_created",
       actor: storedReservation.buyerEmail,
-      details: `${id} ${event.id} ${input.ticketType}`,
+      details: `${id} ${event.id} ${input.ticketType} quantity=${quantity}`,
     });
     return {
       reservation: publicReservation(storedReservation),
@@ -1145,10 +1238,17 @@ export async function fulfillCheckoutReservation(
       ) {
         throw new Error("PAYMENT_INTENT_MISMATCH");
       }
-      const existingTicket = reservation.ticketId
-        ? state.tickets[reservation.ticketId]
-        : undefined;
-      if (!existingTicket) {
+      const existingTickets = ticketsForCheckoutReservation(
+        state,
+        reservation.id,
+        reservation.ticketId,
+      );
+      const existingTicket = existingTickets[0];
+      if (
+        !existingTicket ||
+        existingTicket.id !== reservation.ticketId ||
+        existingTickets.length !== reservation.quantity
+      ) {
         throw new Error("RESERVATION_TICKET_MISSING");
       }
       if (
@@ -1168,12 +1268,14 @@ export async function fulfillCheckoutReservation(
         }
         reservation.stripePaymentIntentId =
           input.stripePaymentIntentId;
-        existingTicket.stripePaymentIntentId =
-          input.stripePaymentIntentId;
+        for (const ticket of existingTickets) {
+          ticket.stripePaymentIntentId = input.stripePaymentIntentId;
+        }
       }
       return {
         reservation: publicReservation(reservation),
         ticket: existingTicket,
+        tickets: existingTickets,
         created: false,
       };
     }
@@ -1196,22 +1298,35 @@ export async function fulfillCheckoutReservation(
       throw new Error("CHECKOUT_PURCHASE_SNAPSHOT_MISSING");
     }
 
-    const ticket = createStoredTicket({
-      state,
-      eventId: reservation.eventId,
-      buyerName: reservation.buyerName,
-      buyerEmail: reservation.buyerEmail,
-      ticketType: reservation.ticketType,
-      storageKey: input.storageKey,
-      storageUrl: input.storageUrl,
-      qrSecret: input.qrSecret,
-      checkoutReservationId: reservation.id,
-      stripeCheckoutSessionId:
-        reservation.stripeCheckoutSessionId ?? undefined,
-      stripeLivemode: reservation.stripeLivemode,
-      stripePaymentIntentId: input.stripePaymentIntentId,
-      purchaseSnapshot: reservation.purchaseSnapshot,
-    });
+    const qrSecrets = resolveFulfillmentQrSecrets(
+      input,
+      reservation.quantity,
+    );
+    const tickets: StoredTicket[] = [];
+    for (const qrSecret of qrSecrets) {
+      const createdTicket = createStoredTicket({
+        state,
+        eventId: reservation.eventId,
+        buyerName: reservation.buyerName,
+        buyerEmail: reservation.buyerEmail,
+        ticketType: reservation.ticketType,
+        storageKey: input.storageKey,
+        storageUrl: input.storageUrl,
+        qrSecret,
+        checkoutReservationId: reservation.id,
+        stripeCheckoutSessionId:
+          reservation.stripeCheckoutSessionId ?? undefined,
+        stripeLivemode: reservation.stripeLivemode,
+        stripePaymentIntentId: input.stripePaymentIntentId,
+        purchaseSnapshot: reservation.purchaseSnapshot,
+      });
+      state.tickets[createdTicket.id] = createdTicket;
+      tickets.push(createdTicket);
+    }
+    const ticket = tickets[0];
+    if (!ticket) {
+      throw new Error("RESERVATION_TICKET_MISSING");
+    }
     const fulfilledAt = new Date().toISOString();
     reservation.status = "fulfilled";
     reservation.fulfilledAt = fulfilledAt;
@@ -1222,17 +1337,22 @@ export async function fulfillCheckoutReservation(
     reservation.deliveryAttempts = 0;
     reservation.deliveryLeaseToken = null;
     reservation.deliveryLeaseExpiresAt = null;
-    state.tickets[ticket.id] = ticket;
     state.auditLog.push({
       id: randomBytes(10).toString("hex"),
       at: fulfilledAt,
       action: "checkout_reservation_fulfilled",
       actor: reservation.buyerEmail,
-      details: `${reservation.id} ${ticket.id}`,
+      details: `${reservation.id} ${tickets.map((item) => item.id).join(" ")}`,
     });
+    const resolvedTickets = ticketsForCheckoutReservation(
+      state,
+      reservation.id,
+      reservation.ticketId,
+    );
     return {
       reservation: publicReservation(reservation),
       ticket,
+      tickets: resolvedTickets,
       created: true,
     };
   });
@@ -1252,22 +1372,38 @@ export async function claimTicketDelivery(
       : DEFAULT_DELIVERY_LEASE_MS;
 
   return withStoreMutation((state) => {
+    const identifiedTicket = input.ticketId
+      ? state.tickets[input.ticketId]
+      : undefined;
     const reservation = input.reservationId
       ? state.checkoutReservations[input.reservationId]
       : Object.values(state.checkoutReservations).find(
-          (candidate) => candidate.ticketId === input.ticketId,
+          (candidate) =>
+            candidate.ticketId === input.ticketId ||
+            candidate.id === identifiedTicket?.checkoutReservationId,
         );
     if (
       !reservation ||
       reservation.status !== "fulfilled" ||
-      !reservation.ticketId ||
-      (input.ticketId && reservation.ticketId !== input.ticketId)
+      !reservation.ticketId
     ) {
       return null;
     }
 
-    const ticket = state.tickets[reservation.ticketId];
-    if (!ticket || reservation.deliveryStatus === "completed") {
+    const tickets = ticketsForCheckoutReservation(
+      state,
+      reservation.id,
+      reservation.ticketId,
+    );
+    const ticket = tickets[0];
+    if (
+      !ticket ||
+      ticket.id !== reservation.ticketId ||
+      tickets.length !== reservation.quantity ||
+      (input.ticketId &&
+        !tickets.some((candidate) => candidate.id === input.ticketId)) ||
+      reservation.deliveryStatus === "completed"
+    ) {
       return null;
     }
     if (
@@ -1294,6 +1430,7 @@ export async function claimTicketDelivery(
     return {
       reservation: publicReservation(reservation),
       ticket,
+      tickets,
       claimToken,
       leaseExpiresAt,
     };
@@ -1451,6 +1588,18 @@ export async function listTickets(): Promise<StoredTicket[]> {
   const state = await readState();
   return Object.values(state.tickets).sort((a, b) =>
     b.issuedAt.localeCompare(a.issuedAt),
+  );
+}
+
+export async function listTicketsByCheckoutReservation(
+  reservationId: string,
+): Promise<StoredTicket[]> {
+  const state = await readState();
+  const reservation = state.checkoutReservations[reservationId];
+  return ticketsForCheckoutReservation(
+    state,
+    reservationId,
+    reservation?.ticketId,
   );
 }
 

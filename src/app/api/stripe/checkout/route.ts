@@ -12,6 +12,8 @@ import { getBaseUrl } from "@/lib/site";
 import {
   attachCheckoutSession,
   cancelCheckoutReservation,
+  emitAvailability,
+  getAvailability,
   reserveCheckoutTicket,
 } from "@/lib/store";
 import {
@@ -20,6 +22,11 @@ import {
   stripeMode,
 } from "@/lib/stripe";
 import { buildStripeCheckoutSessionParams } from "@/lib/stripe-checkout";
+import {
+  isValidTicketQuantity,
+  ticketQuantityOrDefault,
+} from "@/lib/ticket-quantity";
+import { invalidatePublicTicketingCache } from "@/lib/ticketing-cache";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -29,6 +36,7 @@ const MAX_CHECKOUT_BODY_BYTES = 8 * 1024;
 type CheckoutBody = {
   eventId?: unknown;
   ticketType?: unknown;
+  quantity?: unknown;
   locale?: unknown;
 };
 
@@ -40,6 +48,7 @@ const ERROR_COPY = {
     invalidOrigin: "Невалиден източник на заявката.",
     eventUnavailable: "Събитието вече не е достъпно.",
     invalidTicket: "Избери валидна категория билет.",
+    invalidQuantity: "Избери количество между 1 и 10 билета.",
     soldOut: "Тази категория вече е изчерпана.",
     activeCheckout:
       "Вече имаш активно плащане за това събитие. Завърши го или освободи билета.",
@@ -53,6 +62,7 @@ const ERROR_COPY = {
     invalidOrigin: "Invalid request origin.",
     eventUnavailable: "This event is no longer available.",
     invalidTicket: "Choose a valid ticket category.",
+    invalidQuantity: "Choose a ticket quantity between 1 and 10.",
     soldOut: "This ticket category has just sold out.",
     activeCheckout:
       "You already have an active checkout for this event. Finish it or release the ticket first.",
@@ -102,6 +112,11 @@ export async function POST(request: Request) {
   const body = parsedBody.value;
   const locale = body?.locale === "en" ? "en" : "bg";
   const errorCopy = ERROR_COPY[locale];
+  const quantity = ticketQuantityOrDefault(body?.quantity);
+
+  if (!isValidTicketQuantity(quantity)) {
+    return checkoutError(errorCopy.invalidQuantity, 400);
+  }
 
   const session = await getBuyerSession();
   if (!session) {
@@ -170,6 +185,7 @@ export async function POST(request: Request) {
       buyerName: session.name,
       buyerEmail: session.email,
       ticketType: ticketTypeId,
+      quantity,
       locale,
       expiresInMs: 35 * 60_000,
     });
@@ -183,6 +199,7 @@ export async function POST(request: Request) {
         locale,
         reservationId: reservation.id,
         ticketType,
+        quantity,
         buyerEmail: session.email,
       }),
       { idempotencyKey: `ticketme-embedded-checkout-${reservation.id}` },
@@ -199,6 +216,9 @@ export async function POST(request: Request) {
       stripeCheckoutSessionId: checkoutSession.id,
       stripeLivemode: checkoutSession.livemode,
     });
+    invalidatePublicTicketingCache();
+    const availability = await getAvailability(event.id);
+    emitAvailability(event.id, availability);
 
     return Response.json({
       clientSecret: checkoutSession.client_secret,
@@ -206,6 +226,7 @@ export async function POST(request: Request) {
       reservationId: reservation.id,
       expiresAt: reservation.expiresAt,
       mode: stripeMode(),
+      availability,
     });
   } catch (error) {
     if (stripeSessionId) {
@@ -215,7 +236,18 @@ export async function POST(request: Request) {
     }
 
     if (reservation) {
-      await cancelCheckoutReservation(reservation.id).catch(() => undefined);
+      const cancelled = await cancelCheckoutReservation(reservation.id).catch(
+        () => undefined,
+      );
+      if (cancelled?.status === "cancelled") {
+        invalidatePublicTicketingCache();
+        const restoredAvailability = await getAvailability(event.id).catch(
+          () => undefined,
+        );
+        if (restoredAvailability) {
+          emitAvailability(event.id, restoredAvailability);
+        }
+      }
     }
 
     const message = (error as Error).message;

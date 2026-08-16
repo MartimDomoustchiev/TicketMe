@@ -17,12 +17,13 @@ import { getBaseUrl } from "@/lib/site";
 import {
   getCheckoutReservationBySession,
   getTicket,
+  listTicketsByCheckoutReservation,
   type StoredTicket,
 } from "@/lib/store";
 import { fulfillStripeCheckoutSession } from "@/lib/stripe-fulfillment";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 30;
+export const maxDuration = 60;
 
 export const metadata: Metadata = {
   title: "Payment confirmation",
@@ -31,6 +32,7 @@ export const metadata: Metadata = {
 
 type CheckoutState = {
   ticket: StoredTicket | null;
+  tickets: StoredTicket[];
   delivered: boolean;
   processing: boolean;
 };
@@ -44,7 +46,7 @@ async function checkoutState(
       !sessionId.startsWith("cs_live_")) ||
     sessionId.length > 255
   ) {
-    return { ticket: null, delivered: false, processing: false };
+    return { ticket: null, tickets: [], delivered: false, processing: false };
   }
 
   const ownedReservation = await getCheckoutReservationBySession(
@@ -55,7 +57,7 @@ async function checkoutState(
     ownedReservation.buyerEmail.trim().toLowerCase() !==
       buyerEmail.trim().toLowerCase()
   ) {
-    return { ticket: null, delivered: false, processing: false };
+    return { ticket: null, tickets: [], delivered: false, processing: false };
   }
 
   try {
@@ -65,6 +67,7 @@ async function checkoutState(
     );
     return {
       ticket: delivery.ticket,
+      tickets: delivery.tickets,
       delivered: delivery.delivered,
       processing: delivery.inProgress,
     };
@@ -82,13 +85,23 @@ async function checkoutState(
       reservation.buyerEmail.trim().toLowerCase() !==
         buyerEmail.trim().toLowerCase()
     ) {
-      return { ticket: null, delivered: false, processing: false };
+      return { ticket: null, tickets: [], delivered: false, processing: false };
     }
-    const ticket = reservation?.ticketId
-      ? await getTicket(reservation.ticketId).catch(() => null)
-      : null;
+    const tickets = await listTicketsByCheckoutReservation(
+      reservation.id,
+    ).catch(() => []);
+    const ticket =
+      tickets[0] ??
+      (reservation.ticketId
+        ? await getTicket(reservation.ticketId).catch(() => null)
+        : null);
+    const resolvedTickets = tickets.length > 0 ? tickets : ticket ? [ticket] : [];
+    if (resolvedTickets.length !== reservation.quantity) {
+      return { ticket: null, tickets: [], delivered: false, processing: true };
+    }
     return {
       ticket,
+      tickets: resolvedTickets,
       delivered: reservation?.deliveryStatus === "completed",
       processing:
         reservation?.deliveryStatus === "processing" ||
@@ -112,7 +125,7 @@ export default async function CheckoutSuccessPage({
     typeof query.session_id === "string" ? query.session_id : "";
   const state = buyer
     ? await checkoutState(sessionId, buyer.email)
-    : { ticket: null, delivered: false, processing: false };
+    : { ticket: null, tickets: [], delivered: false, processing: false };
   const testMode = state.ticket?.stripeLivemode === false;
   const purchaseSnapshot = state.ticket?.purchaseSnapshot;
   const testSimulation =
@@ -161,14 +174,14 @@ export default async function CheckoutSuccessPage({
                 ? state.delivered
                   ? english
                     ? testMode
-                      ? "No real funds were charged. Your ticket is ready and has been sent to your verified email."
-                      : "Your ticket is ready and has been sent to your verified email."
+                      ? `No real funds were charged. Your ${state.tickets.length === 1 ? "ticket is" : `${state.tickets.length} tickets are`} ready and sent to your verified email.`
+                      : `Your ${state.tickets.length === 1 ? "ticket is" : `${state.tickets.length} tickets are`} ready and sent to your verified email.`
                     : testMode
-                      ? "Не са таксувани реални средства. Билетът е готов и е изпратен на потвърдения ти имейл."
-                      : "Билетът е готов и е изпратен на потвърдения ти имейл."
+                      ? `Не са таксувани реални средства. ${state.tickets.length === 1 ? "Билетът е готов и е изпратен" : `${state.tickets.length} билета са готови и са изпратени`} на потвърдения ти имейл.`
+                      : `${state.tickets.length === 1 ? "Билетът е готов и е изпратен" : `${state.tickets.length} билета са готови и са изпратени`} на потвърдения ти имейл.`
                   : english
-                    ? "Your order is secured. We are preparing the PDF ticket and email now."
-                    : "Поръчката е запазена. Подготвяме PDF билета и имейла."
+                    ? `Your order is secured. We are preparing ${state.tickets.length === 1 ? "the PDF ticket" : `${state.tickets.length} PDF tickets`} and email delivery now.`
+                    : `Поръчката е запазена. Подготвяме ${state.tickets.length === 1 ? "PDF билета" : `${state.tickets.length} PDF билета`} и имейлите.`
                 : english
                   ? "Stripe is still returning the final status. Refresh this page in a moment."
                   : "Stripe все още връща крайния статус. Обнови страницата след малко."}
@@ -202,7 +215,13 @@ export default async function CheckoutSuccessPage({
                     </span>
                     <div className="min-w-0">
                       <p className="text-xs font-black uppercase tracking-wider text-slate-500">
-                        {english ? "Your ticket" : "Твоят билет"}
+                        {state.tickets.length === 1
+                          ? english
+                            ? "Your ticket"
+                            : "Твоят билет"
+                          : english
+                            ? `Your ${state.tickets.length} tickets`
+                            : `Твоите ${state.tickets.length} билета`}
                       </p>
                       <h2 className="mt-1 text-xl font-black">
                         {state.ticket.eventName}
@@ -210,33 +229,46 @@ export default async function CheckoutSuccessPage({
                       <p className="mt-1 text-sm text-slate-600">
                         {state.ticket.eventDate} · {state.ticket.venue}
                       </p>
-                      <p className="mt-2 break-all font-mono text-xs font-bold text-slate-500">
-                        {state.ticket.id}
-                      </p>
+                      {state.tickets.length === 1 && (
+                        <p className="mt-2 break-all font-mono text-xs font-bold text-slate-500">
+                          {state.ticket.id}
+                        </p>
+                      )}
                     </div>
                   </div>
                 </div>
 
-                <div className="mt-6 grid gap-3 sm:grid-cols-2">
-                  <Link
-                    href={localizeHref(
-                      locale,
-                      `/tickets/${state.ticket.id}`,
-                    )}
-                    className="inline-flex h-12 items-center justify-center gap-2 rounded-xl bg-[#2457ff] px-5 font-black text-white transition hover:bg-blue-700"
-                  >
-                    <Ticket size={18} aria-hidden="true" />
-                    {english ? "View ticket" : "Виж билета"}
-                  </Link>
-                  {state.delivered ? (
-                    <a
-                      href={`/api/tickets/${state.ticket.id}/download`}
-                      className="inline-flex h-12 items-center justify-center gap-2 rounded-xl border border-slate-300 px-5 font-black text-slate-900 transition hover:bg-slate-50"
+                <div className="mt-6 grid gap-3">
+                  {state.tickets.map((ticket, index) => (
+                    <div
+                      key={ticket.id}
+                      className="grid gap-2 rounded-2xl border border-slate-200 p-3 sm:grid-cols-[1fr_auto_auto] sm:items-center"
                     >
-                      <Download size={18} aria-hidden="true" />
-                      {english ? "Download PDF" : "Изтегли PDF"}
-                    </a>
-                  ) : (
+                      <p className="min-w-0 truncate px-1 text-sm font-black text-slate-700">
+                        {english ? "Ticket" : "Билет"} {index + 1}
+                        <span className="ml-2 font-mono text-[11px] text-slate-400">
+                          {ticket.id}
+                        </span>
+                      </p>
+                      <Link
+                        href={localizeHref(locale, `/tickets/${ticket.id}`)}
+                        className="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-[#2457ff] px-4 text-sm font-black text-white transition hover:bg-blue-700"
+                      >
+                        <Ticket size={16} aria-hidden="true" />
+                        {english ? "View" : "Виж"}
+                      </Link>
+                      {state.delivered && (
+                        <a
+                          href={`/api/tickets/${ticket.id}/download`}
+                          className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-slate-300 px-4 text-sm font-black text-slate-900 transition hover:bg-slate-50"
+                        >
+                          <Download size={16} aria-hidden="true" />
+                          PDF
+                        </a>
+                      )}
+                    </div>
+                  ))}
+                  {!state.delivered && (
                     <Link
                       href={refreshHref}
                       className="inline-flex h-12 items-center justify-center gap-2 rounded-xl border border-slate-300 px-5 font-black text-slate-900 transition hover:bg-slate-50"

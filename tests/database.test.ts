@@ -126,6 +126,35 @@ test("checkout fairness migration allows one active hold per buyer and event", a
   );
 });
 
+test("ticket quantity migration supports multi-ticket reservations", async () => {
+  const migration = await readFile(
+    path.join(
+      process.cwd(),
+      "database",
+      "migrations",
+      "010_ticket_quantity.sql",
+    ),
+    "utf8",
+  );
+
+  assert.match(
+    migration,
+    /ADD COLUMN IF NOT EXISTS quantity INTEGER NOT NULL DEFAULT 1\s+CHECK \(quantity BETWEEN 1 AND 10\)/,
+  );
+  for (const indexName of [
+    "tickets_checkout_reservation_idx",
+    "tickets_stripe_checkout_session_idx",
+    "tickets_stripe_payment_intent_idx",
+  ]) {
+    assert.match(migration, new RegExp(`DROP INDEX IF EXISTS ${indexName}`));
+    assert.match(migration, new RegExp(`CREATE INDEX ${indexName}`));
+    assert.doesNotMatch(
+      migration,
+      new RegExp(`CREATE UNIQUE INDEX ${indexName}`),
+    );
+  }
+});
+
 test("database readiness requires schema objects and runtime privileges", async () => {
   const queries: string[] = [];
   const ready = await databaseSchemaStatus(
@@ -165,6 +194,14 @@ test("database readiness requires schema objects and runtime privileges", async 
   assert.match(
     queries[0],
     /column_name = 'stripe_livemode'[\s\S]*checkout_reservations[\s\S]*tickets/,
+  );
+  assert.match(
+    queries[0],
+    /table_name = 'checkout_reservations'[\s\S]*column_name = 'quantity'/,
+  );
+  assert.match(
+    queries[0],
+    /tickets_checkout_reservation_idx[\s\S]*NOT indisunique[\s\S]*tickets_stripe_checkout_session_idx[\s\S]*NOT indisunique[\s\S]*tickets_stripe_payment_intent_idx[\s\S]*NOT indisunique/,
   );
 
   const missingQueueLockPrivilege = await databaseSchemaStatus(

@@ -119,10 +119,12 @@ function renderTicketDesk({
   event,
   paymentMode,
   initialSession = null,
+  locale = "en",
 }: {
   event: CatalogEvent;
   paymentMode: "test" | "live";
   initialSession?: ComponentProps<typeof TicketDesk>["initialSession"];
+  locale?: "bg" | "en";
 }): string {
   return renderToStaticMarkup(
     createElement(TicketDesk, {
@@ -132,7 +134,7 @@ function renderTicketDesk({
       paymentMode,
       stripePublishableKey:
         paymentMode === "test" ? "pk_test_fixture" : "pk_live_fixture",
-      locale: "en",
+      locale,
     }),
   );
 }
@@ -289,6 +291,39 @@ test("anonymous admission checkout does not show test disclosure in live mode", 
   assert.match(html, /Sign in to purchase/);
   assert.match(html, /Electronic PDF ticket/);
   assert.doesNotMatch(html, /Stripe test mode|no real money is charged/i);
+});
+
+test("ticket desk exposes a localized, availability-bounded quantity stepper", async () => {
+  const english = renderTicketDesk({
+    event: ADMISSION_EVENT,
+    paymentMode: "live",
+  });
+  const bulgarian = renderTicketDesk({
+    event: ADMISSION_EVENT,
+    paymentMode: "live",
+    locale: "bg",
+  });
+  const ticketDesk = await source("src/components/TicketDesk.tsx");
+
+  assert.match(english, /Ticket quantity/);
+  assert.match(english, /aria-label="Decrease ticket quantity"/);
+  assert.match(english, /aria-label="Increase ticket quantity"/);
+  assert.match(english, /Up to 10 tickets from this category per order/);
+  assert.match(english, /1 × Standard/);
+  assert.match(bulgarian, /Количество билети/);
+  assert.match(bulgarian, /aria-label="Намали броя билети"/);
+  assert.match(bulgarian, /aria-label="Увеличи броя билети"/);
+  assert.match(ticketDesk, /Math\.min\(\s*MAX_TICKETS_PER_ORDER,/);
+  assert.match(
+    ticketDesk,
+    /selectedTicket\.price \* selectedQuantity/,
+  );
+  assert.match(
+    ticketDesk,
+    /const checkoutQuantity = selectedQuantity;[\s\S]*?setTicketQuantity\(checkoutQuantity\);[\s\S]*?quantity: checkoutQuantity/,
+  );
+  assert.match(ticketDesk, /quantityLocked[\s\S]*?copy\.quantityInOrder/);
+  assert.match(ticketDesk, /liveStatus\?\.updateAvailability/);
 });
 
 test("anonymous simulation checkout keeps its non-admission disclosure", () => {

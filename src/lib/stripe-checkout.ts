@@ -1,6 +1,10 @@
 import type Stripe from "stripe";
 import type { CatalogEvent, TicketType } from "@/lib/event";
 import { createCheckoutPurchaseSnapshot } from "@/lib/checkout-purchase-snapshot";
+import {
+  isValidTicketQuantity,
+  ticketQuantityOrDefault,
+} from "@/lib/ticket-quantity";
 
 type BuildStripeCheckoutParamsInput = {
   baseUrl: string;
@@ -9,6 +13,7 @@ type BuildStripeCheckoutParamsInput = {
   locale: "bg" | "en";
   reservationId: string;
   ticketType: TicketType;
+  quantity?: number;
   buyerEmail: string;
 };
 
@@ -17,6 +22,10 @@ export function buildStripeCheckoutSessionParams(
 ): Stripe.Checkout.SessionCreateParams {
   if (input.event.currency !== input.ticketType.currency) {
     throw new Error("CHECKOUT_CURRENCY_MISMATCH");
+  }
+  const quantity = ticketQuantityOrDefault(input.quantity);
+  if (!isValidTicketQuantity(quantity)) {
+    throw new Error("CHECKOUT_INVALID_QUANTITY");
   }
   const purchaseSnapshot = createCheckoutPurchaseSnapshot(
     input.event,
@@ -52,7 +61,7 @@ export function buildStripeCheckoutSessionParams(
     expires_at: input.expiresAtUnix,
     line_items: [
       {
-        quantity: 1,
+        quantity,
         price_data: {
           currency: purchaseSnapshot.currency.toLowerCase(),
           unit_amount: purchaseSnapshot.unitAmountMinor,
@@ -68,6 +77,7 @@ export function buildStripeCheckoutSessionParams(
               eventId: input.event.id,
               ticketType: input.ticketType.id,
               offerKind: purchaseSnapshot.offerKind,
+              quantity: String(quantity),
             },
           },
         },
@@ -78,12 +88,14 @@ export function buildStripeCheckoutSessionParams(
       eventId: input.event.id,
       ticketType: input.ticketType.id,
       offerKind: purchaseSnapshot.offerKind,
+      quantity: String(quantity),
       locale: input.locale,
     },
     payment_intent_data: {
       metadata: {
         reservationId: input.reservationId,
         eventId: input.event.id,
+        quantity: String(quantity),
       },
     },
   };
