@@ -57,6 +57,15 @@ test("checkout rejects cross-origin requests before reading a bounded body", asy
   assert.match(route, /limit: 120/);
   assert.match(route, /key: `stripe-checkout:account:\$\{session\.email/);
   assert.match(route, /limit: 8/);
+  assert.match(route, /if \(!isValidTicketQuantity\(quantity\)\)/);
+  assert.match(
+    route,
+    /quantity\s*=\s*ticketQuantityOrDefault\(body\?\.quantity\)/,
+  );
+  assert.match(route, /invalidQuantity, 400/);
+  assert.match(route, /reserveCheckoutTicket\(\{[\s\S]*?quantity,/);
+  assert.match(route, /buildStripeCheckoutSessionParams\(\{[\s\S]*?quantity,/);
+  assert.match(route, /availability\s*=\s*await getAvailability\(event\.id\)/);
 });
 
 test("embedded Checkout stays on-site and enables eligible card wallets", () => {
@@ -90,6 +99,7 @@ test("embedded Checkout stays on-site and enables eligible card wallets", () => 
 
   const lineItems = params.line_items;
   assert.ok(Array.isArray(lineItems));
+  assert.equal(lineItems[0]?.quantity, 1);
   assert.equal(lineItems[0]?.price_data?.currency, "eur");
   assert.equal(
     lineItems[0]?.price_data?.unit_amount,
@@ -103,6 +113,7 @@ test("embedded Checkout stays on-site and enables eligible card wallets", () => 
     "admission",
   );
   assert.equal(params.metadata?.offerKind, "admission");
+  assert.equal(params.metadata?.quantity, "1");
 });
 
 test("first-party sale event produces the configured Checkout amount and metadata", () => {
@@ -118,16 +129,43 @@ test("first-party sale event produces the configured Checkout amount and metadat
     locale: "bg",
     reservationId: "RSV-PRIMARYSALE0001",
     ticketType: standard,
+    quantity: 3,
     buyerEmail: "verified@example.com",
   });
   const lineItems = params.line_items;
 
   assert.ok(Array.isArray(lineItems));
+  assert.equal(lineItems[0]?.quantity, 3);
   assert.equal(lineItems[0]?.price_data?.unit_amount, 3_900);
   assert.equal(lineItems[0]?.price_data?.currency, "eur");
   assert.equal(params.metadata?.eventId, PRIMARY_SALE_EVENT.id);
   assert.equal(params.metadata?.ticketType, "standard");
+  assert.equal(params.metadata?.quantity, "3");
+  assert.equal(
+    lineItems[0]?.price_data?.product_data?.metadata?.quantity,
+    "3",
+  );
+  assert.equal(params.payment_intent_data?.metadata?.quantity, "3");
   assert.equal(params.customer_email, "verified@example.com");
+});
+
+test("Checkout rejects invalid ticket quantities", () => {
+  const input = {
+    baseUrl: "https://tickets.example",
+    event: INTERNAL_EVENT,
+    expiresAtUnix: 1_800_000_000,
+    locale: "en" as const,
+    reservationId: "RSV-INVALIDQUANTITY",
+    ticketType: TICKET_TYPE,
+    buyerEmail: "wallet@example.com",
+  };
+
+  for (const quantity of [0, 1.5, 11, Number.MAX_SAFE_INTEGER]) {
+    assert.throws(
+      () => buildStripeCheckoutSessionParams({ ...input, quantity }),
+      /CHECKOUT_INVALID_QUANTITY/,
+    );
+  }
 });
 
 test("external test simulation is unmistakably non-admission in Stripe", () => {
@@ -208,20 +246,23 @@ test("Checkout rejects an event and ticket currency mismatch", () => {
 
 test("Stripe fulfillment is pinned to the immutable reservation snapshot", () => {
   const snapshot = createCheckoutPurchaseSnapshot(INTERNAL_EVENT, TICKET_TYPE);
+  const quantity = 3;
   const reservation = {
     eventId: INTERNAL_EVENT.id,
     ticketType: TICKET_TYPE.id,
+    quantity,
     stripeLivemode: false,
     purchaseSnapshot: snapshot,
   };
   const session = {
-    amount_total: snapshot.unitAmountMinor,
+    amount_total: snapshot.unitAmountMinor * quantity,
     currency: snapshot.currency.toLowerCase(),
     livemode: false,
     metadata: {
       eventId: reservation.eventId,
       ticketType: reservation.ticketType,
       offerKind: snapshot.offerKind,
+      quantity: String(quantity),
     },
   };
 
@@ -260,6 +301,60 @@ test("Stripe fulfillment is pinned to the immutable reservation snapshot", () =>
         purchaseSnapshot: null,
       }),
     /CHECKOUT_PURCHASE_SNAPSHOT_MISSING/,
+  );
+
+  assert.throws(
+    () =>
+      assertStripeCheckoutPurchaseSnapshot(
+        {
+          ...session,
+          metadata: { ...session.metadata, quantity: "2" },
+        },
+        reservation,
+      ),
+    /CHECKOUT_METADATA_MISMATCH/,
+  );
+  assert.throws(
+    () =>
+      assertStripeCheckoutPurchaseSnapshot(
+        session,
+        { ...reservation, quantity: 0 },
+      ),
+    /CHECKOUT_QUANTITY_INVALID/,
+  );
+  assert.throws(
+    () =>
+      assertStripeCheckoutPurchaseSnapshot(
+        {
+          ...session,
+          amount_total: Number.MAX_SAFE_INTEGER,
+          metadata: { ...session.metadata, quantity: "2" },
+        },
+        {
+          ...reservation,
+          quantity: 2,
+          purchaseSnapshot: {
+            ...snapshot,
+            unitAmountMinor: Number.MAX_SAFE_INTEGER,
+          },
+        },
+      ),
+    /CHECKOUT_AMOUNT_MISMATCH/,
+  );
+
+  assert.doesNotThrow(() =>
+    assertStripeCheckoutPurchaseSnapshot(
+      {
+        ...session,
+        amount_total: snapshot.unitAmountMinor,
+        metadata: {
+          eventId: reservation.eventId,
+          ticketType: reservation.ticketType,
+          offerKind: snapshot.offerKind,
+        },
+      },
+      { ...reservation, quantity: 1 },
+    ),
   );
 });
 

@@ -1,5 +1,6 @@
 import type Stripe from "stripe";
 import type { CheckoutPurchaseSnapshot } from "@/lib/checkout-purchase-snapshot";
+import { isValidTicketQuantity } from "@/lib/ticket-quantity";
 
 type CheckoutOfferSession = Pick<
   Stripe.Checkout.Session,
@@ -16,6 +17,7 @@ type CheckoutPurchaseSession = Pick<
 type CheckoutPurchaseReservation = {
   eventId: string;
   ticketType: string;
+  quantity: number;
   stripeLivemode?: boolean | null;
   purchaseSnapshot: CheckoutPurchaseSnapshot | null;
 };
@@ -53,15 +55,28 @@ export function assertStripeCheckoutPurchaseSnapshot(
     throw new Error("CHECKOUT_PAYMENT_MODE_MISMATCH");
   }
 
+  if (!isValidTicketQuantity(reservation.quantity)) {
+    throw new Error("CHECKOUT_QUANTITY_INVALID");
+  }
+
+  const sessionQuantity = session.metadata?.quantity;
+  const quantityMetadataMatches =
+    sessionQuantity === String(reservation.quantity) ||
+    (reservation.quantity === 1 && sessionQuantity === undefined);
   if (
     session.metadata?.eventId !== reservation.eventId ||
-    session.metadata?.ticketType !== reservation.ticketType
+    session.metadata?.ticketType !== reservation.ticketType ||
+    !quantityMetadataMatches
   ) {
     throw new Error("CHECKOUT_METADATA_MISMATCH");
   }
 
+  const expectedAmountTotal =
+    snapshot.unitAmountMinor * reservation.quantity;
   if (
-    session.amount_total !== snapshot.unitAmountMinor ||
+    !Number.isSafeInteger(expectedAmountTotal) ||
+    !Number.isSafeInteger(session.amount_total) ||
+    session.amount_total !== expectedAmountTotal ||
     session.currency?.toUpperCase() !== snapshot.currency
   ) {
     throw new Error("CHECKOUT_AMOUNT_MISMATCH");

@@ -32,6 +32,7 @@ import {
   type TicketTypeId,
 } from "@/lib/event";
 import type { Availability } from "@/lib/store";
+import { MAX_TICKETS_PER_ORDER } from "@/lib/ticket-quantity";
 
 type Props = {
   event: CatalogEvent;
@@ -48,6 +49,7 @@ type StripeCheckoutSession = {
   reservationId: string;
   expiresAt: string;
   mode: "test" | "live";
+  availability: Availability;
 };
 
 const COPY = {
@@ -94,14 +96,20 @@ const COPY = {
     successTitle: "Плащането е успешно",
     testSuccessTitle: "Тестовото Stripe плащане е успешно",
     successText: "Твоят PDF билет с QR код е готов.",
+    successTextMany: "Твоите PDF билети с QR код са готови.",
     testSuccessText:
       "Тестовият PDF билет е готов и не е валиден за вход на събитието.",
+    testSuccessTextMany:
+      "Тестовите PDF билети са готови и не са валидни за вход на събитието.",
     admissionTestSuccessText:
       "Не са таксувани реални средства. PDF билетът за вход с QR код е готов.",
+    admissionTestSuccessTextMany:
+      "Не са таксувани реални средства. PDF билетите за вход с QR код са готови.",
     paymentReference: "Stripe референция",
     openTicket: "Виж билета",
     downloadPdf: "Изтегли PDF",
     printPdf: "Отвори за печат",
+    numberedTicket: (number: number) => `Билет ${number}`,
     buyAnother: "Купи още един",
     emailSent: "PDF билетът е изпратен и по имейл.",
     emailPending:
@@ -114,6 +122,14 @@ const COPY = {
     networkError: "Връзката беше прекъсната. Опитай отново.",
     queueNow: "в опашката сега",
     activeCheckouts: "активни Stripe плащания",
+    quantity: "Количество билети",
+    decreaseQuantity: "Намали броя билети",
+    increaseQuantity: "Увеличи броя билети",
+    quantityLimit: (maximum: number) =>
+      `До ${maximum} билета от тази категория в една поръчка.`,
+    quantityInOrder: (quantity: number) =>
+      `${quantity} ${quantity === 1 ? "билет" : "билета"} в тази поръчка.`,
+    quantityUnavailable: "Няма налични билети от тази категория.",
   },
   en: {
     ticketTypesEyebrow: "Ticket types",
@@ -158,14 +174,20 @@ const COPY = {
     successTitle: "Payment successful",
     testSuccessTitle: "Stripe test payment successful",
     successText: "Your PDF ticket with its QR code is ready.",
+    successTextMany: "Your PDF tickets with their QR codes are ready.",
     testSuccessText:
       "Your test PDF ticket is ready and is not valid for venue admission.",
+    testSuccessTextMany:
+      "Your test PDF tickets are ready and are not valid for venue admission.",
     admissionTestSuccessText:
       "No real funds were charged. Your admission PDF ticket with its QR code is ready.",
+    admissionTestSuccessTextMany:
+      "No real funds were charged. Your admission PDF tickets with their QR codes are ready.",
     paymentReference: "Stripe reference",
     openTicket: "View ticket",
     downloadPdf: "Download PDF",
     printPdf: "Open to print",
+    numberedTicket: (number: number) => `Ticket ${number}`,
     buyAnother: "Buy another",
     emailSent: "The PDF ticket was also sent by email.",
     emailPending:
@@ -178,6 +200,14 @@ const COPY = {
     networkError: "The connection was interrupted. Please try again.",
     queueNow: "in queue now",
     activeCheckouts: "active checkouts",
+    quantity: "Ticket quantity",
+    decreaseQuantity: "Decrease ticket quantity",
+    increaseQuantity: "Increase ticket quantity",
+    quantityLimit: (maximum: number) =>
+      `Up to ${maximum} tickets from this category per order.`,
+    quantityInOrder: (quantity: number) =>
+      `${quantity} ${quantity === 1 ? "ticket" : "tickets"} in this order.`,
+    quantityUnavailable: "No tickets from this category are available.",
   },
 } as const;
 
@@ -255,6 +285,7 @@ export function TicketDesk({
     event.ticketTypes.find((type) => type.id === "standard")?.id ??
       event.ticketTypes[0].id,
   );
+  const [ticketQuantity, setTicketQuantity] = useState(1);
   const [message, setMessage] = useState<string | null>(null);
   const [isBuying, setIsBuying] = useState(false);
   const [isCancelling, setIsCancelling] = useState(false);
@@ -284,11 +315,26 @@ export function TicketDesk({
     [event.ticketTypes, selectedType],
   );
   const selectedRemaining = availability.byType[selectedType] ?? 0;
+  const maximumTicketQuantity = Math.min(
+    MAX_TICKETS_PER_ORDER,
+    Math.max(0, selectedRemaining),
+  );
+  const quantityLocked =
+    isBuying || Boolean(stripeSession) || Boolean(purchaseResult);
+  const selectedQuantity = quantityLocked
+    ? ticketQuantity
+    : maximumTicketQuantity > 0
+      ? Math.min(ticketQuantity, maximumTicketQuantity)
+      : 1;
   const selectedTicketCopy = testSimulation
     ? TEST_TICKET_COPY[locale][selectedTicket.id]
     : TICKET_COPY[locale][selectedTicket.id];
   const selectedPrice = formatDualCurrencyPrice(
     selectedTicket.price,
+    locale,
+  );
+  const selectedTotalPrice = formatDualCurrencyPrice(
+    selectedTicket.price * selectedQuantity,
     locale,
   );
   const soldPercent =
@@ -308,6 +354,8 @@ export function TicketDesk({
       return;
     }
 
+    const checkoutQuantity = selectedQuantity;
+    setTicketQuantity(checkoutQuantity);
     setIsBuying(true);
     setMessage(null);
 
@@ -318,6 +366,7 @@ export function TicketDesk({
         body: JSON.stringify({
           eventId: event.id,
           ticketType: selectedType,
+          quantity: checkoutQuantity,
           locale,
         }),
       });
@@ -331,6 +380,7 @@ export function TicketDesk({
         !data.checkoutSessionId ||
         !data.reservationId ||
         !data.expiresAt ||
+        !data.availability ||
         (data.mode !== "test" && data.mode !== "live") ||
         (testSimulation && data.mode !== "test")
       ) {
@@ -338,6 +388,7 @@ export function TicketDesk({
         return;
       }
 
+      liveStatus?.updateAvailability(data.availability);
       setStripeSession(data as StripeCheckoutSession);
     } catch {
       setMessage(copy.networkError);
@@ -363,6 +414,7 @@ export function TicketDesk({
       const payload = (await response.json()) as {
         error?: string;
         completed?: boolean;
+        availability?: Availability;
       };
 
       if (!response.ok) {
@@ -375,6 +427,9 @@ export function TicketDesk({
         return;
       }
 
+      if (payload.availability) {
+        liveStatus?.updateAvailability(payload.availability);
+      }
       setStripeSession(null);
     } catch {
       setMessage(copy.networkError);
@@ -430,8 +485,15 @@ export function TicketDesk({
                   key={type.id}
                   type="button"
                   aria-pressed={isSelected}
-                  disabled={isSoldOut || Boolean(stripeSession)}
-                  onClick={() => setSelectedType(type.id)}
+                  disabled={
+                    isSoldOut ||
+                    Boolean(stripeSession) ||
+                    Boolean(purchaseResult)
+                  }
+                  onClick={() => {
+                    setSelectedType(type.id);
+                    setTicketQuantity(1);
+                  }}
                   className={`group flex min-h-28 w-full items-start gap-3 rounded-2xl border bg-white p-4 text-left transition sm:items-center sm:gap-4 sm:p-5 ${
                     isSelected
                       ? "border-blue-600 shadow-[0_12px_35px_rgba(37,99,235,0.12)] ring-1 ring-blue-600"
@@ -488,7 +550,7 @@ export function TicketDesk({
             <div className="flex items-start justify-between gap-4">
               <div>
                 <p className="font-black text-slate-950">
-                  1 × {selectedTicketCopy.label}
+                  {selectedQuantity} × {selectedTicketCopy.label}
                 </p>
                 <p className="mt-1 text-sm text-slate-500">
                   {testSimulation
@@ -502,10 +564,79 @@ export function TicketDesk({
             </div>
           </div>
 
+          <div className="border-b border-slate-200 py-4">
+            <div className="flex items-center justify-between gap-4">
+              <div>
+                <p
+                  id="ticket-quantity-label"
+                  className="text-sm font-black text-slate-950"
+                >
+                  {copy.quantity}
+                </p>
+                <p
+                  id="ticket-quantity-help"
+                  className="mt-1 text-xs font-bold leading-5 text-slate-500"
+                >
+                  {quantityLocked
+                    ? copy.quantityInOrder(selectedQuantity)
+                    : maximumTicketQuantity > 0
+                      ? copy.quantityLimit(maximumTicketQuantity)
+                      : copy.quantityUnavailable}
+                </p>
+              </div>
+              <div
+                role="group"
+                aria-labelledby="ticket-quantity-label"
+                aria-describedby="ticket-quantity-help"
+                className="flex shrink-0 items-center overflow-hidden rounded-xl border border-slate-200 bg-white"
+              >
+                <button
+                  type="button"
+                  aria-label={copy.decreaseQuantity}
+                  disabled={
+                    quantityLocked ||
+                    maximumTicketQuantity <= 0 ||
+                    selectedQuantity <= 1
+                  }
+                  onClick={() =>
+                    setTicketQuantity(Math.max(1, selectedQuantity - 1))
+                  }
+                  className="inline-flex h-11 w-11 items-center justify-center text-xl font-black text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  <span aria-hidden="true">−</span>
+                </button>
+                <output
+                  aria-live="polite"
+                  aria-atomic="true"
+                  className="inline-flex h-11 min-w-11 items-center justify-center border-x border-slate-200 px-3 font-black tabular-nums text-slate-950"
+                >
+                  {selectedQuantity}
+                </output>
+                <button
+                  type="button"
+                  aria-label={copy.increaseQuantity}
+                  disabled={
+                    quantityLocked ||
+                    maximumTicketQuantity <= 0 ||
+                    selectedQuantity >= maximumTicketQuantity
+                  }
+                  onClick={() =>
+                    setTicketQuantity(
+                      Math.min(maximumTicketQuantity, selectedQuantity + 1),
+                    )
+                  }
+                  className="inline-flex h-11 w-11 items-center justify-center text-xl font-black text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  <span aria-hidden="true">+</span>
+                </button>
+              </div>
+            </div>
+          </div>
+
           <div className="flex items-center justify-between py-4 text-lg">
             <span className="font-bold text-slate-600">{copy.total}</span>
             <span className="max-w-[62%] text-right text-xl font-black leading-7 text-slate-950 sm:text-2xl">
-              {selectedPrice}
+              {selectedTotalPrice}
             </span>
           </div>
 
@@ -576,10 +707,16 @@ export function TicketDesk({
               </h4>
               <p className="mt-1 text-sm leading-6 text-emerald-800">
                 {testSimulation
-                  ? copy.testSuccessText
+                  ? purchaseResult.quantity > 1
+                    ? copy.testSuccessTextMany
+                    : copy.testSuccessText
                   : testPaymentMode
-                    ? copy.admissionTestSuccessText
-                    : copy.successText}
+                    ? purchaseResult.quantity > 1
+                      ? copy.admissionTestSuccessTextMany
+                      : copy.admissionTestSuccessText
+                    : purchaseResult.quantity > 1
+                      ? copy.successTextMany
+                      : copy.successText}
               </p>
               <dl className="mt-3 rounded-xl bg-white/75 p-3 text-xs text-emerald-950">
                 <div className="flex items-center justify-between gap-3">
@@ -594,35 +731,69 @@ export function TicketDesk({
                   ? copy.emailSent
                   : copy.emailPending}
               </p>
-              <div className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-1">
-                <Link
-                  href={purchaseResult.ticketUrl}
-                  className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-emerald-700 px-4 text-sm font-black text-white transition hover:bg-emerald-800"
-                >
-                  <Ticket size={17} aria-hidden="true" />
-                  {copy.openTicket}
-                </Link>
-                <a
-                  href={purchaseResult.downloadUrl}
-                  className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-white px-4 text-sm font-black text-emerald-800 ring-1 ring-emerald-300 transition hover:bg-emerald-100"
-                >
-                  <Download size={17} aria-hidden="true" />
-                  {copy.downloadPdf}
-                </a>
-                <a
-                  href={purchaseResult.printUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-white px-4 text-sm font-black text-emerald-800 ring-1 ring-emerald-300 transition hover:bg-emerald-100"
-                >
-                  <Printer size={17} aria-hidden="true" />
-                  {copy.printPdf}
-                </a>
+              {purchaseResult.quantity > 1 ? (
+                <div className="mt-4 grid gap-2">
+                  {purchaseResult.tickets.map((ticketResult, index) => (
+                    <div
+                      key={ticketResult.ticketId}
+                      className="rounded-xl bg-white/80 p-3"
+                    >
+                      <p className="text-xs font-black text-emerald-950">
+                        {copy.numberedTicket(index + 1)}
+                      </p>
+                      <div className="mt-2 grid grid-cols-2 gap-2">
+                        <Link
+                          href={ticketResult.ticketUrl}
+                          className="inline-flex h-10 items-center justify-center gap-1.5 rounded-lg bg-emerald-700 px-3 text-xs font-black text-white transition hover:bg-emerald-800"
+                        >
+                          <Ticket size={15} aria-hidden="true" />
+                          {copy.openTicket}
+                        </Link>
+                        <a
+                          href={ticketResult.downloadUrl}
+                          className="inline-flex h-10 items-center justify-center gap-1.5 rounded-lg bg-white px-3 text-xs font-black text-emerald-800 ring-1 ring-emerald-300 transition hover:bg-emerald-100"
+                        >
+                          <Download size={15} aria-hidden="true" />
+                          {copy.downloadPdf}
+                        </a>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-1">
+                  <Link
+                    href={purchaseResult.ticketUrl}
+                    className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-emerald-700 px-4 text-sm font-black text-white transition hover:bg-emerald-800"
+                  >
+                    <Ticket size={17} aria-hidden="true" />
+                    {copy.openTicket}
+                  </Link>
+                  <a
+                    href={purchaseResult.downloadUrl}
+                    className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-white px-4 text-sm font-black text-emerald-800 ring-1 ring-emerald-300 transition hover:bg-emerald-100"
+                  >
+                    <Download size={17} aria-hidden="true" />
+                    {copy.downloadPdf}
+                  </a>
+                  <a
+                    href={purchaseResult.printUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-white px-4 text-sm font-black text-emerald-800 ring-1 ring-emerald-300 transition hover:bg-emerald-100"
+                  >
+                    <Printer size={17} aria-hidden="true" />
+                    {copy.printPdf}
+                  </a>
+                </div>
+              )}
+              <div className="mt-2">
                 <button
                   type="button"
                   onClick={() => {
                     setPurchaseResult(null);
                     setStripeSession(null);
+                    setTicketQuantity(1);
                     setMessage(null);
                   }}
                   className="inline-flex h-11 items-center justify-center gap-2 rounded-xl px-4 text-sm font-black text-emerald-800 transition hover:bg-emerald-100"
@@ -742,7 +913,7 @@ export function TicketDesk({
                     )}
                     {isBuying
                       ? copy.processing
-                      : `${testSimulation ? copy.testCheckout : copy.checkout} · ${selectedPrice}`}
+                      : `${testSimulation ? copy.testCheckout : copy.checkout} · ${selectedTotalPrice}`}
                   </button>
                   <p className="mt-3 text-center text-[11px] leading-5 text-slate-500">
                     {copy.agreementStart}{" "}

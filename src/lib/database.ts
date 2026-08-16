@@ -387,6 +387,36 @@ export async function databaseSchemaStatus(
             AND column_name = 'stripe_livemode'
             AND table_name IN ('checkout_reservations', 'tickets')
         )
+        AND EXISTS (
+          SELECT 1
+          FROM information_schema.columns
+          WHERE table_schema = 'public'
+            AND table_name = 'checkout_reservations'
+            AND column_name = 'quantity'
+            AND data_type = 'integer'
+            AND is_nullable = 'NO'
+        )
+        AND EXISTS (
+          SELECT 1
+          FROM pg_index
+          WHERE indexrelid =
+            to_regclass('public.tickets_checkout_reservation_idx')
+            AND NOT indisunique
+        )
+        AND EXISTS (
+          SELECT 1
+          FROM pg_index
+          WHERE indexrelid =
+            to_regclass('public.tickets_stripe_checkout_session_idx')
+            AND NOT indisunique
+        )
+        AND EXISTS (
+          SELECT 1
+          FROM pg_index
+          WHERE indexrelid =
+            to_regclass('public.tickets_stripe_payment_intent_idx')
+            AND NOT indisunique
+        )
         AND to_regclass(
           'public.checkout_reservations_active_buyer_event_idx'
         ) IS NOT NULL

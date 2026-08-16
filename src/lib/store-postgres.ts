@@ -37,6 +37,7 @@ import {
   databaseSql,
   isCloudflareWorkerRuntime,
 } from "@/lib/database";
+import { ticketQuantityOrDefault } from "@/lib/ticket-quantity";
 
 export const POSTGRES_QUEUE_POLICY = {
   leaseSeconds: 15,
@@ -137,18 +138,21 @@ async function prepareSchema(): Promise<void> {
       ADD COLUMN IF NOT EXISTS purchase_source_name TEXT,
       ADD COLUMN IF NOT EXISTS purchase_source_url TEXT
   `;
+  await db`DROP INDEX IF EXISTS tickets_checkout_reservation_idx`;
   await db`
-    CREATE UNIQUE INDEX IF NOT EXISTS tickets_checkout_reservation_idx
+    CREATE INDEX IF NOT EXISTS tickets_checkout_reservation_idx
     ON tickets (checkout_reservation_id)
     WHERE checkout_reservation_id IS NOT NULL
   `;
+  await db`DROP INDEX IF EXISTS tickets_stripe_checkout_session_idx`;
   await db`
-    CREATE UNIQUE INDEX IF NOT EXISTS tickets_stripe_checkout_session_idx
+    CREATE INDEX IF NOT EXISTS tickets_stripe_checkout_session_idx
     ON tickets (stripe_checkout_session_id)
     WHERE stripe_checkout_session_id IS NOT NULL
   `;
+  await db`DROP INDEX IF EXISTS tickets_stripe_payment_intent_idx`;
   await db`
-    CREATE UNIQUE INDEX IF NOT EXISTS tickets_stripe_payment_intent_idx
+    CREATE INDEX IF NOT EXISTS tickets_stripe_payment_intent_idx
     ON tickets (stripe_payment_intent_id)
     WHERE stripe_payment_intent_id IS NOT NULL
   `;
@@ -175,6 +179,8 @@ async function prepareSchema(): Promise<void> {
       id TEXT PRIMARY KEY,
       event_id TEXT NOT NULL,
       ticket_type TEXT NOT NULL,
+      quantity INTEGER NOT NULL DEFAULT 1
+        CHECK (quantity BETWEEN 1 AND 10),
       buyer_name TEXT NOT NULL,
       buyer_email TEXT NOT NULL,
       locale TEXT NOT NULL DEFAULT 'bg'
@@ -231,6 +237,8 @@ async function prepareSchema(): Promise<void> {
   `;
   await db`
     ALTER TABLE checkout_reservations
+      ADD COLUMN IF NOT EXISTS quantity INTEGER NOT NULL DEFAULT 1
+        CHECK (quantity BETWEEN 1 AND 10),
       ADD COLUMN IF NOT EXISTS purchase_offer_kind TEXT,
       ADD COLUMN IF NOT EXISTS purchase_unit_amount_minor INTEGER,
       ADD COLUMN IF NOT EXISTS purchase_currency TEXT,
@@ -439,10 +447,18 @@ function nullableString(value: unknown): string | null {
 }
 
 function mapReservation(row: Record<string, unknown>): CheckoutReservation {
+  const quantity = ticketQuantityOrDefault(
+    row.quantity === undefined ? undefined : Number(row.quantity),
+  );
+  if (!quantity) {
+    throw new Error("INVALID_TICKET_QUANTITY");
+  }
+
   return {
     id: String(row.id),
     eventId: String(row.event_id),
     ticketType: String(row.ticket_type) as TicketTypeId,
+    quantity,
     buyerName: String(row.buyer_name),
     buyerEmail: String(row.buyer_email),
     locale: String(row.locale) as CheckoutLocale,
@@ -488,7 +504,7 @@ async function releaseExpiredInTransaction(
             AND expires_at <= NOW()
             AND event_id = ${eventId}
             AND ticket_type = ${ticketType}
-          RETURNING id, event_id, ticket_type, buyer_email
+          RETURNING id, event_id, ticket_type, quantity, buyer_email
         `
       : eventId
         ? await transaction`
@@ -501,7 +517,7 @@ async function releaseExpiredInTransaction(
             WHERE status = 'reserved'
               AND expires_at <= NOW()
               AND event_id = ${eventId}
-            RETURNING id, event_id, ticket_type, buyer_email
+            RETURNING id, event_id, ticket_type, quantity, buyer_email
           `
         : await transaction`
             UPDATE checkout_reservations
@@ -512,7 +528,7 @@ async function releaseExpiredInTransaction(
                 delivery_lease_expires_at = NULL
             WHERE status = 'reserved'
               AND expires_at <= NOW()
-            RETURNING id, event_id, ticket_type, buyer_email
+            RETURNING id, event_id, ticket_type, quantity, buyer_email
           `;
   const eventIds = new Set<string>();
 
@@ -522,7 +538,10 @@ async function releaseExpiredInTransaction(
     eventIds.add(releasedEventId);
     await transaction`
       UPDATE event_inventory
-      SET remaining = LEAST(capacity, remaining + 1)
+      SET remaining = LEAST(
+        capacity,
+        remaining + ${Number(row.quantity)}
+      )
       WHERE event_id = ${releasedEventId}
         AND ticket_type = ${releasedTicketType}
     `;
@@ -949,6 +968,11 @@ export async function issueTicket(input: {
 export async function reserveCheckoutTicket(
   input: ReserveCheckoutTicketInput,
 ): Promise<CheckoutReservation> {
+  const quantity = ticketQuantityOrDefault(input.quantity);
+  if (!quantity) {
+    throw new Error("INVALID_TICKET_QUANTITY");
+  }
+
   const event = await ensureEventInventory(input.eventId ?? EVENT.id);
   const ticketType = event.ticketTypes.find(
     (candidate) => candidate.id === input.ticketType,
@@ -1061,10 +1085,10 @@ export async function reserveCheckoutTicket(
 
         const inventoryRows = await transaction`
           UPDATE event_inventory
-          SET remaining = remaining - 1
+          SET remaining = remaining - ${quantity}
           WHERE event_id = ${event.id}
             AND ticket_type = ${input.ticketType}
-            AND remaining > 0
+            AND remaining >= ${quantity}
           RETURNING remaining
         `;
         if (!inventoryRows[0]) {
@@ -1079,7 +1103,8 @@ export async function reserveCheckoutTicket(
         const expiresAt = new Date(Date.now() + lifetimeMs).toISOString();
         const rows = await transaction`
           INSERT INTO checkout_reservations (
-            id, event_id, ticket_type, buyer_name, buyer_email, locale,
+            id, event_id, ticket_type, quantity,
+            buyer_name, buyer_email, locale,
             status, created_at, expires_at,
             purchase_offer_kind, purchase_unit_amount_minor,
             purchase_currency, purchase_event_name, purchase_event_date,
@@ -1090,6 +1115,7 @@ export async function reserveCheckoutTicket(
             ${reservationId},
             ${event.id},
             ${input.ticketType},
+            ${quantity},
             ${input.buyerName.trim()},
             ${normalizedBuyerEmail},
             ${input.locale === "en" ? "en" : "bg"},
@@ -1115,7 +1141,7 @@ export async function reserveCheckoutTicket(
             ${createdAt},
             'checkout_reservation_created',
             ${normalizedBuyerEmail},
-            ${`${reservationId} ${event.id} ${input.ticketType}`}
+            ${`${reservationId} ${event.id} ${input.ticketType} x${quantity}`}
           )
         `;
         await transaction`
@@ -1232,7 +1258,10 @@ export async function attachCheckoutSession(
         `;
         await transaction`
           UPDATE event_inventory
-          SET remaining = LEAST(capacity, remaining + 1)
+          SET remaining = LEAST(
+            capacity,
+            remaining + ${reservation.quantity}
+          )
           WHERE event_id = ${reservation.eventId}
             AND ticket_type = ${reservation.ticketType}
         `;
@@ -1388,7 +1417,10 @@ async function releaseCheckoutReservation(
     `;
     await transaction`
       UPDATE event_inventory
-      SET remaining = LEAST(capacity, remaining + 1)
+      SET remaining = LEAST(
+        capacity,
+        remaining + ${reservation.quantity}
+      )
       WHERE event_id = ${reservation.eventId}
         AND ticket_type = ${reservation.ticketType}
     `;
@@ -1535,6 +1567,43 @@ export async function listTicketDeliveriesForRetry(
   );
 }
 
+function fulfillmentQrSecrets(
+  input: FulfillCheckoutReservationInput,
+  quantity: number,
+): string[] {
+  if (input.qrSecrets !== undefined) {
+    if (
+      input.qrSecrets.length !== quantity ||
+      input.qrSecrets.some(
+        (secret) => typeof secret !== "string" || !secret.trim(),
+      ) ||
+      new Set(input.qrSecrets).size !== quantity
+    ) {
+      throw new Error("INVALID_QR_SECRETS");
+    }
+    return [...input.qrSecrets];
+  }
+
+  if (quantity === 1) {
+    return [input.qrSecret];
+  }
+
+  const secrets = [
+    input.qrSecret.trim()
+      ? input.qrSecret
+      : randomBytes(32).toString("base64url"),
+  ];
+  const usedSecrets = new Set(secrets);
+  while (secrets.length < quantity) {
+    const secret = randomBytes(32).toString("base64url");
+    if (!usedSecrets.has(secret)) {
+      usedSecrets.add(secret);
+      secrets.push(secret);
+    }
+  }
+  return secrets;
+}
+
 export async function fulfillCheckoutReservation(
   input: FulfillCheckoutReservationInput,
 ): Promise<CheckoutFulfillmentResult | null> {
@@ -1585,16 +1654,26 @@ export async function fulfillCheckoutReservation(
         ) {
           throw new Error("PAYMENT_INTENT_MISMATCH");
         }
-        const ticketRows = await transaction`
+        let ticketRows = await transaction`
           SELECT *
           FROM tickets
-          WHERE id = ${reservation.ticketId as string}
+          WHERE checkout_reservation_id = ${reservation.id}
+          ORDER BY
+            CASE
+              WHEN id = ${reservation.ticketId as string} THEN 0
+              ELSE 1
+            END,
+            issued_at ASC,
+            id ASC
         `;
-        if (!ticketRows[0]) {
+        if (
+          !reservation.ticketId ||
+          ticketRows.length !== reservation.quantity ||
+          String(ticketRows[0]?.id) !== reservation.ticketId
+        ) {
           throw new Error("RESERVATION_TICKET_MISSING");
         }
         let resolvedReservation = reservation;
-        let resolvedTicketRow = ticketRows[0];
         if (
           input.stripePaymentIntentId &&
           !reservation.stripePaymentIntentId
@@ -1606,23 +1685,35 @@ export async function fulfillCheckoutReservation(
             WHERE id = ${reservation.id}
             RETURNING *
           `;
-          const updatedTicketRows = await transaction`
+          await transaction`
             UPDATE tickets
             SET stripe_payment_intent_id =
               ${input.stripePaymentIntentId}
-            WHERE id = ${reservation.ticketId as string}
-            RETURNING *
+            WHERE checkout_reservation_id = ${reservation.id}
           `;
           resolvedReservation = mapReservation(
             updatedReservationRows[0] as Record<string, unknown>,
           );
-          resolvedTicketRow = updatedTicketRows[0];
+          ticketRows = await transaction`
+            SELECT *
+            FROM tickets
+            WHERE checkout_reservation_id = ${reservation.id}
+            ORDER BY
+              CASE
+                WHEN id = ${reservation.ticketId} THEN 0
+                ELSE 1
+              END,
+              issued_at ASC,
+              id ASC
+          `;
         }
+        const tickets = ticketRows.map((ticketRow) =>
+          mapTicket(ticketRow as Record<string, unknown>),
+        );
         return {
           reservation: resolvedReservation,
-          ticket: mapTicket(
-            resolvedTicketRow as Record<string, unknown>,
-          ),
+          ticket: tickets[0],
+          tickets,
           created: false,
         };
       }
@@ -1636,62 +1727,96 @@ export async function fulfillCheckoutReservation(
         throw new Error("CHECKOUT_PURCHASE_SNAPSHOT_MISSING");
       }
 
-      const id = `TKT-${randomBytes(12).toString("hex").toUpperCase()}`;
+      const qrSecrets = fulfillmentQrSecrets(input, reservation.quantity);
+      const ticketIds: string[] = [];
+      const uniqueTicketIds = new Set<string>();
+      while (ticketIds.length < reservation.quantity) {
+        const candidate = `TKT-${randomBytes(12)
+          .toString("hex")
+          .toUpperCase()}`;
+        if (!uniqueTicketIds.has(candidate)) {
+          uniqueTicketIds.add(candidate);
+          ticketIds.push(candidate);
+        }
+      }
+
       const issuedAt = new Date().toISOString();
-      const seatLabel = `${reservation.ticketType.toUpperCase()}-${id.slice(
-        -10,
-      )}`;
       const purchaseSnapshot = reservation.purchaseSnapshot;
-      const ticketRows = await transaction`
-        INSERT INTO tickets (
-          id, buyer_name, buyer_email, ticket_type, seat_label,
-          event_id, event_name, event_date, venue, issued_at,
-          storage_key, storage_url, qr_secret, status,
-          checkout_reservation_id, stripe_checkout_session_id,
-          stripe_payment_intent_id, stripe_livemode,
-          purchase_offer_kind, purchase_unit_amount_minor,
-          purchase_currency, purchase_event_name, purchase_event_date,
-          purchase_venue, purchase_ticket_label, purchase_source_name,
-          purchase_source_url
-        )
-        VALUES (
-          ${id},
-          ${reservation.buyerName},
-          ${reservation.buyerEmail},
-          ${reservation.ticketType},
-          ${seatLabel},
-          ${reservation.eventId},
-          ${purchaseSnapshot.eventName},
-          ${purchaseSnapshot.eventDate},
-          ${purchaseSnapshot.venue},
-          ${issuedAt},
-          ${input.storageKey},
-          ${input.storageUrl},
-          ${input.qrSecret},
-          'issued',
-          ${reservation.id},
-          ${reservation.stripeCheckoutSessionId},
-          ${input.stripePaymentIntentId ?? null},
-          ${reservation.stripeLivemode ?? null},
-          ${purchaseSnapshot.offerKind},
-          ${purchaseSnapshot.unitAmountMinor},
-          ${purchaseSnapshot.currency},
-          ${purchaseSnapshot.eventName},
-          ${purchaseSnapshot.eventDate},
-          ${purchaseSnapshot.venue},
-          ${purchaseSnapshot.ticketLabel},
-          ${purchaseSnapshot.sourceName},
-          ${purchaseSnapshot.sourceUrl}
-        )
-        RETURNING *
-      `;
+      const insertedTickets: StoredTicket[] = [];
+      for (let index = 0; index < ticketIds.length; index += 1) {
+        const id = ticketIds[index];
+        const seatLabel =
+          `${reservation.ticketType.toUpperCase()}-${id.slice(-10)}`;
+        const ticketRows = await transaction`
+          INSERT INTO tickets (
+            id, buyer_name, buyer_email, ticket_type, seat_label,
+            event_id, event_name, event_date, venue, issued_at,
+            storage_key, storage_url, qr_secret, status,
+            checkout_reservation_id, stripe_checkout_session_id,
+            stripe_payment_intent_id, stripe_livemode,
+            purchase_offer_kind, purchase_unit_amount_minor,
+            purchase_currency, purchase_event_name, purchase_event_date,
+            purchase_venue, purchase_ticket_label, purchase_source_name,
+            purchase_source_url
+          )
+          VALUES (
+            ${id},
+            ${reservation.buyerName},
+            ${reservation.buyerEmail},
+            ${reservation.ticketType},
+            ${seatLabel},
+            ${reservation.eventId},
+            ${purchaseSnapshot.eventName},
+            ${purchaseSnapshot.eventDate},
+            ${purchaseSnapshot.venue},
+            ${issuedAt},
+            ${input.storageKey},
+            ${input.storageUrl},
+            ${qrSecrets[index]},
+            'issued',
+            ${reservation.id},
+            ${reservation.stripeCheckoutSessionId},
+            ${input.stripePaymentIntentId ?? null},
+            ${reservation.stripeLivemode ?? null},
+            ${purchaseSnapshot.offerKind},
+            ${purchaseSnapshot.unitAmountMinor},
+            ${purchaseSnapshot.currency},
+            ${purchaseSnapshot.eventName},
+            ${purchaseSnapshot.eventDate},
+            ${purchaseSnapshot.venue},
+            ${purchaseSnapshot.ticketLabel},
+            ${purchaseSnapshot.sourceName},
+            ${purchaseSnapshot.sourceUrl}
+          )
+          RETURNING *
+        `;
+        insertedTickets.push(
+          mapTicket(ticketRows[0] as Record<string, unknown>),
+        );
+      }
+
+      const primaryTicket = insertedTickets[0];
+      if (
+        !primaryTicket ||
+        insertedTickets.length !== reservation.quantity
+      ) {
+        throw new Error("RESERVATION_TICKET_MISSING");
+      }
+      const tickets = [
+        primaryTicket,
+        ...insertedTickets.slice(1).sort(
+          (left, right) =>
+            Date.parse(left.issuedAt) - Date.parse(right.issuedAt) ||
+            left.id.localeCompare(right.id),
+        ),
+      ];
       const updatedRows = await transaction`
         UPDATE checkout_reservations
         SET status = 'fulfilled',
             fulfilled_at = ${issuedAt},
             stripe_payment_intent_id =
               ${input.stripePaymentIntentId ?? null},
-            ticket_id = ${id},
+            ticket_id = ${primaryTicket.id},
             delivery_status = 'pending',
             delivery_attempts = 0,
             delivery_lease_token = NULL,
@@ -1706,16 +1831,15 @@ export async function fulfillCheckoutReservation(
           ${issuedAt},
           'checkout_reservation_fulfilled',
           ${reservation.buyerEmail},
-          ${`${reservation.id} ${id}`}
+          ${`${reservation.id} ${ticketIds.join(" ")}`}
         )
       `;
       return {
         reservation: mapReservation(
           updatedRows[0] as Record<string, unknown>,
         ),
-        ticket: mapTicket(
-          ticketRows[0] as Record<string, unknown>,
-        ),
+        ticket: primaryTicket,
+        tickets,
         created: true,
       };
     });
@@ -1750,10 +1874,12 @@ export async function claimTicketDelivery(
           FOR UPDATE
         `
       : await transaction`
-          SELECT *
-          FROM checkout_reservations
-          WHERE ticket_id = ${input.ticketId as string}
-          FOR UPDATE
+          SELECT reservation.*
+          FROM checkout_reservations AS reservation
+          INNER JOIN tickets AS ticket
+            ON ticket.checkout_reservation_id = reservation.id
+          WHERE ticket.id = ${input.ticketId as string}
+          FOR UPDATE OF reservation
         `;
     const row = rows[0];
     if (!row) {
@@ -1763,7 +1889,6 @@ export async function claimTicketDelivery(
     if (
       reservation.status !== "fulfilled" ||
       !reservation.ticketId ||
-      (input.ticketId && reservation.ticketId !== input.ticketId) ||
       reservation.deliveryStatus === "completed" ||
       (reservation.deliveryStatus === "processing" &&
         reservation.deliveryLeaseExpiresAt &&
@@ -1786,11 +1911,28 @@ export async function claimTicketDelivery(
     const ticketRows = await transaction`
       SELECT *
       FROM tickets
-      WHERE id = ${reservation.ticketId}
+      WHERE checkout_reservation_id = ${reservation.id}
+      ORDER BY
+        CASE
+          WHEN id = ${reservation.ticketId} THEN 0
+          ELSE 1
+        END,
+        issued_at ASC,
+        id ASC
     `;
-    if (!ticketRows[0]) {
+    if (
+      ticketRows.length !== reservation.quantity ||
+      String(ticketRows[0]?.id) !== reservation.ticketId ||
+      (input.ticketId &&
+        !ticketRows.some((ticketRow) =>
+          String(ticketRow.id) === input.ticketId
+        ))
+    ) {
       throw new Error("RESERVATION_TICKET_MISSING");
     }
+    const tickets = ticketRows.map((ticketRow) =>
+      mapTicket(ticketRow as Record<string, unknown>),
+    );
     await transaction`
       INSERT INTO audit_log (id, at, action, actor, details)
       VALUES (
@@ -1805,7 +1947,8 @@ export async function claimTicketDelivery(
       reservation: mapReservation(
         updatedRows[0] as Record<string, unknown>,
       ),
-      ticket: mapTicket(ticketRows[0] as Record<string, unknown>),
+      ticket: tickets[0],
+      tickets,
       claimToken,
       leaseExpiresAt,
     };
@@ -1976,6 +2119,29 @@ export async function getTicket(id: string): Promise<StoredTicket | null> {
   await ensureSchema();
   const rows = await databaseSql()`SELECT * FROM tickets WHERE id = ${id}`;
   return rows[0] ? mapTicket(rows[0] as Record<string, unknown>) : null;
+}
+
+export async function listTicketsByCheckoutReservation(
+  reservationId: string,
+): Promise<StoredTicket[]> {
+  await ensureSchema();
+  const rows = await databaseSql()`
+    SELECT *
+    FROM tickets
+    WHERE checkout_reservation_id = ${reservationId}
+    ORDER BY
+      CASE
+        WHEN id = (
+          SELECT ticket_id
+          FROM checkout_reservations
+          WHERE id = ${reservationId}
+        ) THEN 0
+        ELSE 1
+      END,
+      issued_at ASC,
+      id ASC
+  `;
+  return rows.map((row) => mapTicket(row as Record<string, unknown>));
 }
 
 export async function listTickets(): Promise<StoredTicket[]> {

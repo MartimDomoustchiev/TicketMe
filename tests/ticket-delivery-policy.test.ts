@@ -48,6 +48,32 @@ test("missing ticket objects are uploaded again even when database metadata exis
   `);
 });
 
+test("multi-ticket delivery is bounded, concurrent, and preserves ticket order", async () => {
+  const moduleUrl = pathToFileURL(
+    `${projectRoot}/src/lib/stripe-fulfillment.ts`,
+  ).href;
+
+  await runWithReactServerCondition(`
+    import assert from "node:assert/strict";
+    const { runTicketDeliveryBatch } = await import(${JSON.stringify(moduleUrl)});
+    let active = 0;
+    let maximumActive = 0;
+    const values = await runTicketDeliveryBatch(
+      [0, 1, 2, 3, 4, 5, 6],
+      async (value) => {
+        active += 1;
+        maximumActive = Math.max(maximumActive, active);
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        active -= 1;
+        return value * 2;
+      },
+    );
+
+    assert.deepEqual(values, [0, 2, 4, 6, 8, 10, 12]);
+    assert.equal(maximumActive, 3);
+  `);
+});
+
 test("recovery scans beyond poison records while keeping the attempted batch bounded", async () => {
   const moduleUrl = pathToFileURL(
     `${projectRoot}/src/lib/ticket-delivery-recovery.ts`,

@@ -11,7 +11,7 @@ import { getStripeClient, getStripeWebhookSecret } from "@/lib/stripe";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const maxDuration = 30;
+export const maxDuration = 60;
 
 const MAX_WEBHOOK_BYTES = 1_000_000;
 

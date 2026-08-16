@@ -7,6 +7,7 @@ import {
   getPurchaseActivity,
 } from "@/lib/store";
 import { singleFlight } from "@/lib/single-flight";
+import { PUBLIC_TICKETING_CACHE_TAG } from "@/lib/ticketing-cache";
 import { retryTransientPostgresRead } from "@/lib/transient-postgres-read";
 
 type AvailabilityLoader = (eventId: string) => Promise<Availability>;
@@ -28,7 +29,7 @@ const loadSharedAvailability = unstable_cache(
         ),
     ),
   ["ticketme-public-availability-v1"],
-  { revalidate: 2, tags: ["ticketme-public-ticketing"] },
+  { revalidate: 2, tags: [PUBLIC_TICKETING_CACHE_TAG] },
 );
 
 const loadSharedPurchaseActivity = unstable_cache(
@@ -41,7 +42,7 @@ const loadSharedPurchaseActivity = unstable_cache(
         ),
     ),
   ["ticketme-public-purchase-activity-v1"],
-  { revalidate: 2, tags: ["ticketme-public-ticketing"] },
+  { revalidate: 2, tags: [PUBLIC_TICKETING_CACHE_TAG] },
 );
 
 export async function getSharedAvailability(

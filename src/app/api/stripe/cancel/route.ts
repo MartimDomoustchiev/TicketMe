@@ -2,8 +2,11 @@ import { getBuyerSession } from "@/lib/auth";
 import { consumeRateLimit, requestIdentity } from "@/lib/rate-limit";
 import { readJsonBodyWithinLimit } from "@/lib/request-body";
 import { isSameOriginRequest } from "@/lib/request-security";
+import { invalidatePublicTicketingCache } from "@/lib/ticketing-cache";
 import {
   cancelCheckoutReservation,
+  emitAvailability,
+  getAvailability,
   getCheckoutReservation,
 } from "@/lib/store";
 import { getStripeClient, isStripeConfigured } from "@/lib/stripe";
@@ -129,6 +132,12 @@ export async function POST(request: Request) {
     );
   }
 
-  await cancelCheckoutReservation(reservation.id);
+  const cancelled = await cancelCheckoutReservation(reservation.id);
+  if (cancelled?.status === "cancelled") {
+    invalidatePublicTicketingCache();
+    const availability = await getAvailability(reservation.eventId);
+    emitAvailability(reservation.eventId, availability);
+    return Response.json({ ok: true, availability });
+  }
   return Response.json({ ok: true });
 }

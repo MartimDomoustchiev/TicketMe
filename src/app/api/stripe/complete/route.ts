@@ -6,12 +6,14 @@ import { getBaseUrl } from "@/lib/site";
 import {
   getCheckoutReservationBySession,
   getTicket,
+  listTicketsByCheckoutReservation,
+  type StoredTicket,
 } from "@/lib/store";
 import { fulfillStripeCheckoutSession } from "@/lib/stripe-fulfillment";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const maxDuration = 30;
+export const maxDuration = 60;
 const MAX_COMPLETE_BODY_BYTES = 8 * 1024;
 
 type CompleteBody = {
@@ -39,6 +41,40 @@ const COPY = {
     rateLimit: "Too many requests. Please try again shortly.",
   },
 } as const;
+
+function ticketLinks(ticket: StoredTicket, locale: "bg" | "en") {
+  return {
+    ticketId: ticket.id,
+    ticketUrl: `/${locale}/tickets/${ticket.id}`,
+    downloadUrl: `/api/tickets/${ticket.id}/download`,
+    printUrl: `/api/tickets/${ticket.id}/download?print=1`,
+  };
+}
+
+function completedCheckoutPayload(input: {
+  tickets: StoredTicket[];
+  locale: "bg" | "en";
+  delivered: boolean;
+  paymentReference: string;
+}) {
+  const tickets = input.tickets.map((ticket) =>
+    ticketLinks(ticket, input.locale),
+  );
+  const primary = tickets[0];
+  if (!primary) {
+    throw new Error("CHECKOUT_TICKET_NOT_FOUND");
+  }
+
+  return {
+    ok: true,
+    status: input.delivered ? "ready" : "processing",
+    ...primary,
+    tickets,
+    quantity: tickets.length,
+    emailDelivered: input.delivered,
+    paymentReference: input.paymentReference,
+  };
+}
 
 export async function POST(request: Request) {
   if (!isSameOriginRequest(request)) {
@@ -123,16 +159,14 @@ export async function POST(request: Request) {
       return Response.json({ error: copy.notFound }, { status: 404 });
     }
 
-    return Response.json({
-      ok: true,
-      status: result.delivered ? "ready" : "processing",
-      ticketId: result.ticket.id,
-      ticketUrl: `/${locale}/tickets/${result.ticket.id}`,
-      downloadUrl: `/api/tickets/${result.ticket.id}/download`,
-      printUrl: `/api/tickets/${result.ticket.id}/download?print=1`,
-      emailDelivered: result.delivered,
-      paymentReference: sessionId,
-    });
+    return Response.json(
+      completedCheckoutPayload({
+        tickets: result.tickets,
+        locale,
+        delivered: result.delivered,
+        paymentReference: sessionId,
+      }),
+    );
   } catch (error) {
     const message = (error as Error).message;
     if (message === "CHECKOUT_NOT_PAID") {
@@ -144,27 +178,33 @@ export async function POST(request: Request) {
 
     const latestReservation =
       await getCheckoutReservationBySession(sessionId).catch(() => null);
-    const ticket = latestReservation?.ticketId
-      ? await getTicket(latestReservation.ticketId).catch(() => null)
-      : null;
+    const tickets = latestReservation
+      ? await listTicketsByCheckoutReservation(latestReservation.id).catch(
+          () => [],
+        )
+      : [];
+    const ticket =
+      tickets[0] ??
+      (latestReservation?.ticketId
+        ? await getTicket(latestReservation.ticketId).catch(() => null)
+        : null);
+    const resolvedTickets = tickets.length > 0 ? tickets : ticket ? [ticket] : [];
     if (
       ticket &&
+      latestReservation &&
+      resolvedTickets.length === latestReservation.quantity &&
       ticket.buyerEmail.trim().toLowerCase() ===
         buyer.email.trim().toLowerCase()
     ) {
       const delivered = latestReservation?.deliveryStatus === "completed";
 
       return Response.json(
-        {
-          ok: true,
-          status: delivered ? "ready" : "processing",
-          ticketId: ticket.id,
-          ticketUrl: `/${locale}/tickets/${ticket.id}`,
-          downloadUrl: `/api/tickets/${ticket.id}/download`,
-          printUrl: `/api/tickets/${ticket.id}/download?print=1`,
-          emailDelivered: delivered,
+        completedCheckoutPayload({
+          tickets: resolvedTickets,
+          locale,
+          delivered,
           paymentReference: sessionId,
-        },
+        }),
         delivered
           ? { status: 200 }
           : { status: 202, headers: { "Retry-After": "2" } },
